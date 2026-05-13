@@ -73,7 +73,7 @@ EgoTouch is the first dataset to jointly provide multi-view video, bimanual hand
 
 ## 🏗️ Main Contributions
 
-1. **First large-scale multi-view tactile dataset** for egocentric hand-object interaction, comprising 302 tasks, 4,530 episodes, bimanual pose, and dense continuous pressure maps across diverse indoor and outdoor scenes
+1. **First large-scale multi-view tactile dataset** for egocentric hand-object interaction, comprising 208 tasks, 1,891 episodes, bimanual pose, and dense continuous pressure maps across diverse indoor and outdoor scenes
 
 2. **First multi-view tactile prediction benchmark**, including evaluation protocols that quantify the role of complementary wrist views and show clear gains under severe occlusion
 

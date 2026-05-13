@@ -30,7 +30,7 @@
 
 ## 🎯 Overview
 
-We introduce **EgoTouch**, the first large-scale multi-view tactile dataset for egocentric hand-object interaction, comprising **302 diverse manipulation tasks** across **4,530 episodes** in both indoor and outdoor environments. The dataset provides synchronized multi-view video (egocentric + dual wrist cameras), bimanual 3D hand pose (42 joints), and dense continuous pressure maps from wearable tactile sensors.
+We introduce **EgoTouch**, the first large-scale multi-view tactile dataset for egocentric hand-object interaction, comprising **208 diverse manipulation tasks** across **1,891 episodes** in both indoor and outdoor environments. The dataset provides synchronized multi-view video (egocentric + dual wrist cameras), bimanual 3D hand pose (42 joints), and dense continuous pressure maps from wearable tactile sensors.
 
 Building upon this dataset, we propose **TouchAnything**, a unified multi-view tactile prediction architecture that integrates shared vision encoding, cross-view attention, and view dropout strategy. Our experiments demonstrate that incorporating complementary wrist views is crucial for resolving occluded contact regions and enabling reliable tactile inference under severe occlusions.
 

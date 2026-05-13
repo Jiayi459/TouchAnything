@@ -10,9 +10,11 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 **[Jianyi Zhou](https://github.com/Jianyi2004)<sup>1</sup>, Ziteng Gao<sup>1</sup>, Feiyang Hong<sup>1</sup>, Zirui Liu<sup>1</sup>, Guannan Zhang<sup>1</sup>, Weisheng Dai<sup>1</sup>,**  
-**Ruichen Zhen<sup>2</sup>, Chuqiao Lyu<sup>2</sup>, Haotian Wu<sup>2</sup>, Yinian Mao<sup>2</sup>, Xushi Wang<sup>1</sup>, Yuxiang Jiang<sup>1</sup>, [Shuo Yang](mailto:shuoyang@hit.edu.cn)<sup>1✉</sup>**
+**Ruichen Zhen<sup>2</sup>, Chuqiao Lyu<sup>3</sup>, Haotian Wu<sup>2</sup>, Yinian Mao<sup>2</sup>, Xushi Wang<sup>1</sup>, Yuxiang Jiang<sup>1</sup>,**  
+**Wenbo Ding<sup>3</sup>, [Shuo Yang](mailto:shuoyang@hit.edu.cn)<sup>1✉</sup>**
 
-<sup>1</sup>Harbin Institute of Technology, Shenzhen &nbsp;&nbsp; <sup>2</sup>Meituan Academy of Robotics
+<sup>1</sup>Harbin Institute of Technology, Shenzhen &nbsp;&nbsp; <sup>2</sup>Meituan Academy of Robotics  
+<sup>3</sup>Tsinghua Shenzhen International Graduate School, Tsinghua University
 
 <sup>✉</sup>Corresponding author
 
@@ -23,9 +25,9 @@
 ## 📢 News
 
 - **[2026-04]** Project website and initial README released
-- **[Coming Soon]** Paper submission
-- **[Coming Soon]** Dataset release
-- **[Coming Soon]** Code release
+- **[2026-05]** Paper submission
+- **[2026-05]** Dataset release
+- **[2026-05]** Code release
 
 ## 🎯 Overview
 
@@ -44,8 +46,8 @@ Building upon this dataset, we propose **TouchAnything**, a unified multi-view t
 
 | Metric | Value |
 |--------|-------|
-| **Manipulation Tasks** | 302 |
-| **Episodes** | 4,530 |
+| **Manipulation Tasks** | 208 |
+| **Episodes** | 1,891 |
 | **Camera Views** | 3 (Ego + Dual Wrist) |
 | **Hand Joints** | 42 (Bimanual) |
 | **Total Frames** | ~2M |
@@ -84,16 +86,16 @@ EgoTouch is the first dataset to jointly provide multi-view video, bimanual hand
 
 <table>
 <tr>
-<td align="center"><b>Grasping Thermos</b><br><img src="assets/拿保温杯_20260325_171636_233_tactile.gif" width="100%"></td>
-<td align="center"><b>Handling Hair Dryer</b><br><img src="assets/拿吹风机_20260320_094951_941_tactile.gif" width="100%"></td>
+<td align="center"><b>Grasping Thermos</b><br><img src="assets/grasping_thermos_20260325_171636_233_tactile.gif" width="100%"></td>
+<td align="center"><b>Handling Hair Dryer</b><br><img src="assets/handling_hair_dryer_20260320_094951_941_tactile.gif" width="100%"></td>
 </tr>
 <tr>
-<td align="center"><b>Grasping Beverage</b><br><img src="assets/拿饮料_20260325_163212_035_tactile.gif" width="100%"></td>
-<td align="center"><b>Picking Up Mouse</b><br><img src="assets/拿鼠标2_20260316_215323_166_tactile.gif" width="100%"></td>
+<td align="center"><b>Grasping Beverage</b><br><img src="assets/grasping_beverage_20260325_163212_035_tactile.gif" width="100%"></td>
+<td align="center"><b>Picking Up Mouse</b><br><img src="assets/picking_up_mouse_20260316_215323_166_tactile.gif" width="100%"></td>
 </tr>
 <tr>
-<td align="center"><b>Bouncing Ping-Pong Ball</b><br><img src="assets/颠乒乓球_20260320_172305_280_tactile.gif" width="100%"></td>
-<td align="center"><b>USB Insertion</b><br><img src="assets/插拔USB接口_20260319_115454_872_tactile.gif" width="100%"></td>
+<td align="center"><b>Bouncing Ping-Pong Ball</b><br><img src="assets/bouncing_ping_pong_ball_20260320_172305_280_tactile.gif" width="100%"></td>
+<td align="center"><b>USB Insertion</b><br><img src="assets/usb_insertion_20260319_115454_872_tactile.gif" width="100%"></td>
 </tr>
 </table>
 
@@ -109,7 +111,7 @@ Our data collection system integrates:
 
 - **Head-mounted Wide-Angle Camera**: Captures global manipulation context from a wide-field first-person perspective
 - **Dual Wrist Cameras**: Observe hand-object contact regions to overcome occlusion
-- **Pressure-Sensing Gloves**: Record dense 16×16 pressure maps on each palm
+- **Pressure-Sensing Gloves**: Record dense 16x16 pressure maps on each palm
 - **Motion Capture**: Tracks 42-joint bimanual 3D hand pose at 30Hz
 - **Temporal Synchronization**: All modalities aligned with millisecond precision
 
@@ -136,34 +138,101 @@ Each episode is stored as an HDF5 file with the following structure:
 ├── images/
 │   ├── chest_color    # (T, 480, 640, 3) egocentric RGB
 │   ├── left_color     # (T, 480, 640, 3) left wrist RGB
-│   ├── right_color    # (T, 480, 640, 3) right wrist RGB
-│   └── *_depth        # (T, 480, 640) depth maps
+│   └── right_color    # (T, 480, 640, 3) right wrist RGB
 ├── hands/
-│   ├── left_joint_xyz         # (T, 21, 3) left hand pose
-│   ├── right_joint_xyz        # (T, 21, 3) right hand pose
-│   └── *_joint_orientation    # (T, 21, 4) joint quaternions
+│   ├── wilor_left_joint_xyz   # (T, 21, 3) left hand pose from WiLoR
+│   ├── wilor_right_joint_xyz  # (T, 21, 3) right hand pose from WiLoR
+│   ├── wilor_left_valid       # (T,) left-hand pose validity mask
+│   ├── wilor_right_valid      # (T,) right-hand pose validity mask
+│   ├── left_joint_xyz         # (T,) legacy placeholder
+│   └── right_joint_xyz        # (T,) legacy placeholder
 ├── pressure/
 │   ├── left_pressure_grid     # (T, 21, 21) normalized [0,1]
 │   ├── right_pressure_grid    # (T, 21, 21) normalized [0,1]
-│   └── task_vmax (attr)       # task-level normalization factor
+│   └── attrs                  # grid_size, separate_normalization, tactile/bend maxima
 ├── poses/
 │   ├── chest_pose     # (T, 7) camera pose [xyz, quat]
 │   ├── left_pose      # (T, 7) left wrist camera pose
 │   └── right_pose     # (T, 7) right wrist camera pose
-└── metadata/
-    ├── task_name, trajectory_id, fps, num_frames
-    └── camera_resolution
+├── masks/
+│   ├── glove_masks          # (T, N, 480, 640) glove/object masks, N may be 0
+│   ├── glove_obj_ids        # (T, N) object ids for mask channels
+│   ├── glove_valid_frames   # (T,) mask-valid frame flags
+│   └── attrs                # mask availability and object-count metadata
+├── metadata/
+│   └── attrs                # task_name, trajectory_id, fps, num_frames, camera_resolution, etc.
+└── timestamps               # (T,) frame timestamps
 ```
 
-**T**: number of frames per episode (~120 frames @ 30Hz)
+**T** is the number of frames in the episode. The released HDF5 files use 30 FPS and may contain variable-length trajectories.
 
 ## 📦 Installation
 
-> **Coming Soon**: Installation instructions will be provided upon code release.
+Clone the repository and create the conda environment:
+
+```bash
+cd /path/to/TouchAnything
+conda env create -f environment.yaml
+conda activate touchanything
+```
+
+The training and inference scripts assume they are launched from the repository root.
 
 ## 🎯 Quick Start
 
-> **Coming Soon**: Usage examples and tutorials will be provided upon code release.
+### 1. Download the Dataset
+
+Download the EgoTouch dataset from Hugging Face:
+
+```text
+https://huggingface.co/datasets/zhouzhoujy/EgoTouch/
+```
+
+After extraction, place the raw dataset under the repository dataset directory, for example:
+
+```text
+datasets/EgoTouch/
+```
+
+### 2. Convert Raw Data to HDF5
+
+Convert the raw dataset into the HDF5 format used by the training and inference pipeline:
+
+```bash
+bash scripts/run_convert_to_hdf5.sh
+```
+
+The converted dataset is expected to be stored as:
+
+```text
+datasets/EgoTouch_hdf5/
+```
+
+Move the official split file into the converted HDF5 dataset directory:
+
+```bash
+mv datasets/EgoTouch/split.json datasets/EgoTouch_hdf5/split.json
+```
+
+### 3. Train
+
+Start distributed training with the default configuration:
+
+```bash
+bash scripts/run_train_ddp.sh
+```
+
+Training checkpoints will be saved under the checkpoint directory configured by the training script.
+
+### 4. Evaluate
+
+After training finishes, run inference and evaluation:
+
+```bash
+bash scripts/run_inference.sh
+```
+
+The inference outputs, metrics, and visualization videos will be written to the output directory configured in the script.
 
 ## 📧 Contact
 
@@ -183,10 +252,12 @@ This work represents a collaborative effort across multiple domains, from hardwa
 - **Guannan Zhang**: Project website video editing, data collection
 - **Weisheng Dai**: Experimental equipment management, data collection
 - **Ruichen Zhen**: Equipment procurement and hardware configuration
+- **Chuqiao Lyu**: Data collection system setup
 - **Haotian Wu**: Data collection hardware setup support
 - **Yinian Mao**: High-level guidance and project support
-- **Xushi Wang**: HaMeR inference framework development, data collection
+- **Xushi Wang**: Wilor inference framework development, data collection
 - **Yuxiang Jiang**: Data collection participation
+- **Wenbo Ding**: High-level idea discussions
 - **Shuo Yang**: Research ideation, project supervision, model design consultation, technical guidance
 
 ## 📄 License
@@ -197,8 +268,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 <div align="center">
 
-**© 2026 M-PAI Lab, Harbin Institute of Technology, Shenzhen. All rights reserved.**
 
-[Project Page](https://jianyi2004.github.io/TouchAnything-Website/) | [Paper (Coming Soon)](#) | [Dataset (Coming Soon)](#)
+[Project Page](https://jianyi2004.github.io/TouchAnything-Website/) | [Paper (Coming Soon)](#) | [Dataset](https://hf-mirror.com/datasets/zhouzhoujy/EgoTouch)
 
 </div>

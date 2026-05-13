@@ -25,8 +25,7 @@
 ## 📢 News
 
 - **[2026-04]** Project website and initial README released
-- **[2026-05]** Paper submission
-- **[2026-05]** Dataset release
+- **[2026-05]** Dataset upload in progress; the currently accessible files may be incomplete until the upload finishes
 - **[2026-05]** Code release
 
 ## 🎯 Overview

@@ -5,7 +5,7 @@
 ### The First Dataset and Framework for Bimanual Tactile Estimation from Egocentric Video
 
 [![Project Page](https://img.shields.io/badge/Project-Page-blue)](https://jianyi2004.github.io/TouchAnything-Website/)
-[![Paper](https://img.shields.io/badge/Paper-Coming%20Soon-orange)](#)
+[![Paper](https://img.shields.io/badge/Paper-arXiv-red)](https://arxiv.org/abs/2605.13083)
 [![Dataset](https://img.shields.io/badge/Dataset-Hugging%20Face-green)](https://huggingface.co/datasets/zhouzhoujy/EgoTouch/tree/main)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
@@ -268,6 +268,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 <div align="center">
 
 
-[Project Page](https://jianyi2004.github.io/TouchAnything-Website/) | [Paper (Coming Soon)](#) | [Dataset](https://hf-mirror.com/datasets/zhouzhoujy/EgoTouch)
+[Project Page](https://jianyi2004.github.io/TouchAnything-Website/) | [Paper](https://arxiv.org/abs/2605.13083) | [Dataset](https://hf-mirror.com/datasets/zhouzhoujy/EgoTouch)
 
 </div>

@@ -68,8 +68,8 @@ EgoTouch is the first dataset to jointly provide multi-view video, bimanual hand
 | HOI4D | ❌ | Est. | ❌ | ❌ | Single | 800 | 2.4M |
 | EgoPressure | ❌ | Est. | Pressure | ❌ | Single | 31 | 4.3M |
 | EgoDex | ❌ | Est. | Analytical | ❌ | Biman. | 500 | 90M |
-| OpenTouch | ✅ | Glove + Est. | Pressure | ❌ | Single | 800 | ~500k |
-| **EgoTouch (Ours)** | ✅ | **Glove** | **Pressure** | ✅ | **Biman.** | **1000** | **2M** |
+| OpenTouch | ✅ | Glove | Pressure | ❌ | Single | 800 | ~500k |
+| **EgoTouch (Ours)** | ✅ | **Glove + Est.** | **Pressure** | ✅ | **Biman.** | **1000** | **2M** |
 
 ## 🏗️ Main Contributions
 

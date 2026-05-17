@@ -233,6 +233,22 @@ bash scripts/run_inference.sh
 
 The inference outputs, metrics, and visualization videos will be written to the output directory configured in the script.
 
+## 📝 Citation
+
+If you find this project useful, please cite:
+
+```bibtex
+@misc{zhou2026touchanythingdatasetframeworkbimanual,
+      title={TouchAnything: A Dataset and Framework for Bimanual Tactile Estimation from Egocentric Video}, 
+      author={Jianyi Zhou and Ziteng Gao and Feiyang Hong and Zirui Liu and Guannan Zhang and Weisheng Dai and Ruichen Zhen and Chuqiao Lyu and Haotian Wu and Yinian Mao and Xushi Wang and Yuxiang Jiang and Wenbo Ding and Shuo Yang},
+      year={2026},
+      eprint={2605.13083},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2605.13083}, 
+}
+```
+
 ## 📧 Contact
 
 For questions or collaboration opportunities, please contact:

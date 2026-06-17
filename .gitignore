@@ -1,0 +1,24 @@
+# Datasets (large; downloaded separately from Hugging Face)
+/datasets/
+
+# Python virtual environments
+/.venv/
+.venv/
+venv/
+
+# Claude Code local state
+/.claude/
+
+# Logs / scratch
+*.log
+scripts/download_egotouch.log
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+Thumbs.db

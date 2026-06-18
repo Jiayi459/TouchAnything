@@ -48,7 +48,16 @@ Newest session at the bottom.
 ### Execution progress
 - [x] CLAUDE.md adapted to TouchAnything.
 - [x] Installed `gh` 2.94.0 at `C:\Program Files\GitHub CLI\gh.exe` (not on PATH in pre-existing shells; available in new terminals).
-- [ ] **BLOCKED:** User must run `gh auth login` (interactive browser/device flow — Claude cannot perform it). Not logged in as of 2026-06-17.
+- [x] User authenticated `gh` as **Jiayi459** (scopes: repo, workflow, read:org, gist).
+- [x] Set repo-local git identity: `Jiayi459 <jh9141@nyu.edu>`.
+- [x] Created fork **`Jiayi459/TouchAnything`** (isFork=true, parent=Jianyi2004/TouchAnything).
+- [x] Re-pointed remotes: `origin` → `Jiayi459/TouchAnything`, `upstream` → `Jianyi2004/TouchAnything`.
+- [x] Committed 4 files (`1509fe9`) and pushed `main` to the fork. Remote HEAD verified = `1509fe9`. Dataset/.venv/.claude excluded (confirmed not staged).
+
+### COMPLETED 2026-06-17. Fork live at https://github.com/Jiayi459/TouchAnything
+
+### OPEN ITEM (not part of commit)
+- `README.md` has an **accidental working-tree edit**: the string `& "C:\Program Files\GitHub CLI\gh.exe" auth login` was pasted into line 39 mid-sentence (likely a stray paste in the IDE). It was **not** staged/committed/pushed. Pending user decision: revert via `git restore README.md`, or keep/fix manually.
 - [ ] Set `git user.name`/`user.email` (name from gh login; email jh9141@nyu.edu).
 - [ ] `gh repo fork Jianyi2004/TouchAnything` → re-point origin to fork, upstream to original.
 - [ ] Commit 4 files, push to fork (publishing — proceed only after auth confirmed).

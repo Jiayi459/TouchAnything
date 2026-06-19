@@ -149,8 +149,11 @@ def leave_one_task_out(tasks):
 # Numpy metrics (computed in ORIGINAL [0,1] space, masked, per-horizon)
 # --------------------------------------------------------------------------- #
 def _masked(arr, mask):
-    """arr:(...,2,21,21) -> values at valid taxels, broadcasting mask."""
-    m = np.broadcast_to(mask, arr.shape)
+    """arr:(...,2,21,21) -> values at valid taxels, broadcasting mask.
+
+    Accepts a bool or 0/1 (float/int) mask; cast to bool for boolean indexing.
+    """
+    m = np.broadcast_to(np.asarray(mask, dtype=bool), arr.shape)
     return arr[m]
 
 

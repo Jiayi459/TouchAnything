@@ -13,6 +13,11 @@ venv/
 *.log
 scripts/download_egotouch.log
 
+# Training outputs / job logs (rsynced back from CRC)
+/runs/
+/logs/
+*.pt
+
 # Python caches
 __pycache__/
 *.py[cod]

@@ -1,0 +1,20 @@
+# Lean CUDA conda env for tactile->tactile forecasting on ND CRC (GPU).
+# NOTE: PyTorch is installed separately (CUDA wheels) in setup_crc_env.sh, not here,
+# so the correct cu124 build is fetched from the PyTorch index rather than PyPI CPU wheels.
+name: tactile
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - numpy==1.24.3
+      - scipy
+      - h5py
+      - pandas
+      - tqdm
+      - tensorboard
+      - matplotlib
+      - scikit-image      # SSIM / image metrics
+      - einops
+      - pyyaml

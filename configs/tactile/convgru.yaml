@@ -1,0 +1,28 @@
+# ConvGRU — primary recurrent forecaster (recommended for N=82).
+name: convgru
+# data / windowing
+t_in: 10            # 0.33 s context @30fps
+t_out: 15           # 0.5 s horizon (decision: 0.5 s)
+stride: 5
+transform: log1p    # amplitude transform for sparse, heavy-tailed pressure
+alpha: 10.0
+# splits
+kfolds: 5
+val_frac: 0.15
+# model
+hid: 64
+layers: 2
+kernel: 3
+# training
+batch_size: 64
+lr: 0.001
+wd: 0.0001
+epochs: 80
+patience: 15
+ss_epochs: 30       # scheduled-sampling (teacher-forcing) decay over 30 epochs
+active_weight: 3.0  # upweight active (contact) taxels vs sparse background
+# augmentation
+augment: true
+noise: 0.01
+scale: 0.1
+hflip: true

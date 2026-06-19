@@ -1,0 +1,26 @@
+# SimVP-lite — headline CNN forecaster (non-recurrent; efficient on small data).
+name: simvp
+t_in: 10
+t_out: 15
+stride: 5
+transform: log1p
+alpha: 10.0
+kfolds: 5
+val_frac: 0.15
+# model
+hid: 64
+n_enc: 2
+n_trans: 4
+kernel: 3
+# training (no scheduled sampling — not autoregressive)
+batch_size: 64
+lr: 0.001
+wd: 0.0001
+epochs: 80
+patience: 15
+ss_epochs: 0
+active_weight: 3.0
+augment: true
+noise: 0.01
+scale: 0.1
+hflip: true

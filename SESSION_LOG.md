@@ -58,6 +58,137 @@ Newest session at the bottom.
 
 ### OPEN ITEM (not part of commit)
 - `README.md` has an **accidental working-tree edit**: the string `& "C:\Program Files\GitHub CLI\gh.exe" auth login` was pasted into line 39 mid-sentence (likely a stray paste in the IDE). It was **not** staged/committed/pushed. Pending user decision: revert via `git restore README.md`, or keep/fix manually.
+
+---
+
+## Session 2 — 2026-06-18 — Dataset action categorization + grasp-success forecast (PLANNING)
+
+### Request (verbatim intent)
+Go through the EgoTouch dataset; (1) divide all data into categories based on **hand action**; (2) determine which category is **suitable for grasping an item**; (3) **forecast grasp success possibility**.
+
+### Exploration completed (facts)
+- Local dataset = metadata-only (no mp4): `datasets/EgoTouch/`. Structure: `Scene/task_name/trajectory_id/{pressure_grids.npz, wilor_hands.json, hamer_hands.json, rokoko_hands.json, vive_poses.json, manual_contact_annotation.json, masks.npz, jq_pressure.json}`.
+- **212 real tasks** (213 folders minus `Home/metadata`), **1933 trajectories**. Scenes: Home 124, Office 13, Outdoor 25, Retail 19, Workbench 32 (task counts).
+- Task names encode action verbs: grasp/grip/hold/lift, pick_up (largest), pull/push/drag, open/close, fold/spread/wring, plug_unplug, squeeze/pinch, twist/turn/rotate, play (games/sports), swing/throw/bounce/hit/toss, spray/press/click/slide, use/wash/buy/shop/take/put/move/organize/cut/assemble/write, etc.
+- **Signals available** (metadata only): `pressure_grids.npz` = left/right tactile grids (T,21,21) normalized to [0,1] (attr `tactile_max`); hand pose (wilor/hamer); camera/wrist poses (vive/rokoko); masks.
+- **No grasp success/failure labels exist.** `manual_contact_annotation.json` only has coarse per-traj `left_contact`/`right_contact` booleans, True in only ~5-6% of a 120-sample → NOT a usable success label.
+- Pressure data quality: 120-traj sample had 0 all-NaN grids; some trajectories have partial-NaN frames (e.g., `Home/grasp_cola/20260320_090636_772` left grid). Must handle NaNs.
+
+### Env feasibility
+- Current `touchanything` conda env / `.venv`: numpy/scipy/h5py/opencv/pandas present. **No scikit-learn** (would need install) and **no deep-learning stack** (Linux/GPU-only, not installable on Windows). So: heuristic/statistical forecast = feasible now; classical ML (sklearn) = feasible after install; deep model = NOT feasible here.
+
+### Proposed plan (PENDING user resolution — not yet implemented per CLAUDE.md directive 5)
+1. Categorize all 1933 trajectories by hand-action type via task-name verb taxonomy (transparent, reproducible).
+2. Mark grasp-suitable categories (core: grasp/grip/hold/lift/pick_up; partial: squeeze/pinch/take/twist_cap).
+3. Define a grasp-success **proxy** from tactile pressure (no GT exists) and compute per-category success probability + per-trajectory scores; emit a markdown report + CSV.
+
+### OPEN QUESTIONS — RESOLVED (2026-06-18)
+1. **Categorization method** → **name/verb taxonomy.**
+2. **"Suitable for grasp item"** → **core grasp verbs only** (grasp/grip/hold/lift + pick_up).
+3. **Grasp-success forecast** → **DEFERRED.** "For now only classify, not yet for prediction success." Do not build any success metric/model yet.
+4. **Deliverables** → **wait for user instruction after classification.** Classification done locally; nothing committed yet.
+
+### Classification result (script: `scripts/categorize_actions.py`, NOT committed pending instruction)
+- Method: assign each task to one action category by first known action verb in its name (verb_object convention).
+- **212 tasks, 1930 trajectories** across 23 categories.
+- **CORE GRASP (grasp-suitable) = `Grasp/Hold/Lift` (8 tasks, 82 traj) + `Pick-up` (64 tasks, 635 traj) = 72 tasks / 717 traj (~37% of all trajectories).**
+- Largest non-grasp categories: Organize/Arrange (140), Use tool/appliance (131), Open/Close (130), Squeeze (100), Push/Pull/Drag/Slide (98), Plug/Unplug/Insert (89).
+- Full per-category task assignment printed to console; reviewed edge cases (e.g. `pick_up_and_squeeze_power_bank`→Pick-up by leading verb; `grip_hand_dynamometer`→Grasp/Hold/Lift; `handle_*`,`remove_pen_cap`,`split_*`→Other).
+
+### Pending user instruction
+- Whether to commit `scripts/categorize_actions.py` and emit a report/CSV.
+- When/if to proceed to the grasp-success forecast (and which success definition).
+
+---
+
+## Session 3 — 2026-06-18 — Grasp/Hold/Lift tactile subset + tactile→tactile forecasting plan
+
+### Request
+Download (prepare) the Grasp/Hold/Lift data; goal = train a model to predict **future tactile
+from past tactile**. Produce an implementation plan: literature review, process, method choice,
+validation, preprocessing. Be rigorous/constructive/precise/efficient.
+
+### Key reasoning / decisions
+- Task is **tactile→tactile** forecasting ⇒ **videos not needed**; `pressure_grids.npz` already
+  on disk from the metadata pull. "Download" = prepare the subset, not re-fetch MP4s.
+- Prepared subset `datasets/grasp_hold_lift_tactile/` (+ `manifest.csv`) via
+  `scripts/prepare_grasp_tactile.py`. **82 traj, 31,577 frames @30fps.**
+
+### EDA facts (ground the plan)
+- Lengths skewed: min 71 / median 125 (~4.2s) / mean 385 / max 2206 ⇒ windowing required.
+- Each hand 21×21 with **~50.8% structurally-NaN cells = fixed sensor mask** (~220 valid taxels);
+  values in [0,1]; ~33% valid taxels active/frame (sparse).
+- **Predictability probe** (`scripts/tactile_predictability_probe.py`): persistence nMSE
+  0.04→0.13→0.23→0.47→0.72→1.34 at h=1/3/5/10/15/30; force autocorr 0.99→...→−0.17 at lag 30.
+  ⇒ honest horizon **0.1–0.5s**; persistence is a strong baseline ⇒ judge models by **skill vs
+  persistence**; **N=82 is the binding constraint**.
+
+### Literature review (in plan)
+Tactile prediction: ACTP/ACTVP (arXiv:2205.09430, Conv-LSTM, slip), DFPC strawberry
+(2303.05393), Dream-Tac (2606.08737), Tactile diffusion policy (2510.13324). Backbones: OpenSTL,
+ConvLSTM, PredRNN, **SimVP/TAU** (2206.05099, CVPR'22/23), PredFormer (2410.04733), survey
+(2401.14718). Recommendation: **SimVP/TAU headline + ConvLSTM baseline**; transformer/generative
+as extensions.
+
+### Compute (UPDATED after user: "we have gpu, school CRC")
+- Two-tier: local Windows (`touchanything` env, CPU torch) for dev/baselines; **CRC GPU cluster
+  (Linux+CUDA, likely SLURM)** for training/CV/ablations. `environment.yaml` builds on cluster.
+- GPU enables **pretrain on all 1,930 traj → fine-tune on 82 grasp clips** to fight small-N.
+
+### Artifacts (NOT committed — pending approval per CLAUDE.md)
+- `docs/TACTILE_PREDICTION_PLAN.md` (full plan), `scripts/prepare_grasp_tactile.py`,
+  `scripts/tactile_predictability_probe.py`, `datasets/grasp_hold_lift_tactile/` (gitignored).
+
+### DECISIONS — RESOLVED (2026-06-18, user)
+1. Horizon = **0.5 s** (15 frames @30fps); report 1/3/5/10/15.
+2. Hands = **both** (bimanual 2-ch primary, dominant-hand ablation).
+3. Method = **ConvGRU primary** + ConvLSTM precedent baseline + SimVP/TAU headline CNN.
+   GRU question answered: ConvGRU chosen for N=82 (fewer params/less overfit, keeps spatial
+   structure); plain GRU rejected (flattening loses contact geometry).
+4. Compute = **ND CRC**. CONFIRMED scheduler = **UGE/`qsub`** (NOT SLURM), GPU via
+   `-q gpu -l gpu_card=1` (4-day limit). Conda: init once, `conda activate` in jobs.
+5. **Pretrain on all 1,930 traj → fine-tune on 82 grasp clips.**
+6. **Deterministic** next-frame prediction (generative deferred).
+7. **CUDA** env (no local CPU torch).
+
+### CRC env setup created (this turn; NOT committed)
+- `scripts/crc/environment_tactile_cuda.yaml` (lean conda env), `scripts/crc/setup_crc_env.sh`
+  (conda init + env + CUDA torch 2.5.1/cu124), `scripts/crc/train_gpu.job` (UGE GPU template),
+  `scripts/crc/README.md` (rsync + setup + qsub workflow).
+- Plan `docs/TACTILE_PREDICTION_PLAN.md` updated: §4 model lineup (ConvGRU), §6 compute (UGE),
+  §10 decisions resolved.
+- Refs: CRC GPU docs https://docs.crc.nd.edu/resources/gpu.html ; conda
+  https://docs.crc.nd.edu/popular_modules/conda.html
+
+### BUILD ("go", 2026-06-18) — `src/tactile_forecast/` package implemented
+- `tactile_utils.py` (torch-free: mask/transform/window/splits/metrics) — **verified locally**
+  on real data: mask 217 valid/hand (structural, 0 variance across trajs), 5,955 windows
+  (Tin10/Tout15/stride5), LTO 5-fold (65/17), LOTO 8-fold, metric sanity OK.
+- `data.py` (TactileWindows + trajectory-level split_train_val, mask-safe aug),
+  `models/{conv_rnn(ConvGRU+ConvLSTM, scheduled sampling), simvp}`, `models.build_model`,
+  `engine.py` (masked MSE + active-taxel weight, train/eval, SS schedule),
+  `baselines.py` (persistence, last-velocity), `train.py`/`eval.py` (CLI: lto/loto, fold,
+  grasp/full, pretrain & --pretrained finetune; outputs best.pt/train_log/test_metrics/summary).
+- `configs/tactile/{convgru,convlstm,simvp}.yaml`. CRC: `scripts/crc/smoke_test.py` (synthetic
+  e2e) + updated `train_gpu.job` (runs entrypoint via -v CONFIG/FOLD/SCOPE/PROTOCOL/PRETRAINED)
+  + README run recipe.
+- **All 11 modules byte-compile.** Torch path NOT run locally (no local torch per decision #7);
+  to be smoke-tested on CRC (`python scripts/crc/smoke_test.py`).
+- Headline metric = mean **skill vs persistence** (must be >0); honest horizon ≤0.5 s.
+
+### CORRECTION (2026-06-18) — TAU not implemented
+- User asked where the "TAU" training method is. **It is not in the code.** Built models =
+  SimVP-lite, ConvGRU, ConvLSTM only. Plan said "SimVP/TAU" (family name) but only SimVP exists
+  (`configs/tactile/simvp.yaml`; no `tau.yaml`). TAU = Temporal Attention Unit (Tan et al.,
+  CVPR 2023, arXiv:2206.12126): SimVP skeleton + TAU translator (intra-frame statical + inter-frame
+  dynamical attention, parallelizable) + Differential Divergence Regularization loss.
+- ACTION PENDING user choice: either implement TAU (`models/tau.py` + DDR in engine + tau.yaml)
+  OR edit plan wording "SimVP/TAU" → "SimVP" to match code.
+
+### PENDING
+- Run on CRC: `setup_crc_env.sh` → `smoke_test.py` → pretrain (full) → fine-tune LTO/LOTO CV.
+- Commit decision: Session 2/3 artifacts (categorize script, tactile prep/probe scripts, plan,
+  src/tactile_forecast, configs, crc setup) — not yet committed/pushed to the fork.
 - [ ] Set `git user.name`/`user.email` (name from gh login; email jh9141@nyu.edu).
 - [ ] `gh repo fork Jianyi2004/TouchAnything` → re-point origin to fork, upstream to original.
 - [ ] Commit 4 files, push to fork (publishing — proceed only after auth confirmed).

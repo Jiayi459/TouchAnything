@@ -1,0 +1,36 @@
+#!/bin/bash
+# UGE GPU job for ND CRC. Submit from the repo root after `mkdir -p logs`:
+#   qsub scripts/crc/train_gpu.job
+# Pass variables, e.g.:  qsub -v FOLD=0,CONFIG=configs/tactile/convgru.yaml scripts/crc/train_gpu.job
+#$ -M netid@nd.edu          # <-- replace netid
+#$ -m abe
+#$ -q gpu                   # GPU queue (4-day limit)
+#$ -l gpu_card=1            # request 1 GPU
+#$ -pe smp 8               # CPU cores for dataloading
+#$ -N tactile_train
+#$ -cwd
+#$ -o logs/
+#$ -e logs/
+
+set -euo pipefail
+
+# Activate env directly (per CRC docs: do NOT `module load conda` inside a job)
+conda activate tactile
+
+echo "Host: $(hostname)  JOB_ID: ${JOB_ID:-NA}  FOLD: ${FOLD:-NA}"
+python - <<'PY'
+import torch
+print("CUDA available:", torch.cuda.is_available())
+print("Device:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "none")
+PY
+
+# Training entrypoint. Pass vars via qsub -v, e.g.:
+#   qsub -v CONFIG=configs/tactile/convgru.yaml,FOLD=0,PRETRAINED=runs/convgru_pretrain/best.pt train_gpu.job
+PRETRAINED_ARG=""
+if [ -n "${PRETRAINED:-}" ]; then PRETRAINED_ARG="--pretrained ${PRETRAINED}"; fi
+python -m src.tactile_forecast.train \
+    --config "${CONFIG:-configs/tactile/convgru.yaml}" \
+    --protocol "${PROTOCOL:-lto}" \
+    --fold "${FOLD:-0}" \
+    --scope "${SCOPE:-grasp}" \
+    ${PRETRAINED_ARG}

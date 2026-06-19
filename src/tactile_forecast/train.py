@@ -125,7 +125,7 @@ def main():
     # --- model ---
     model = build_model(cfg).to(device)
     if args.pretrained:
-        sd = torch.load(args.pretrained, map_location=device)
+        sd = torch.load(args.pretrained, map_location=device, weights_only=False)
         model.load_state_dict(sd["model"] if "model" in sd else sd, strict=False)
         print(f"[init] loaded pretrained weights from {args.pretrained}")
     n_params = sum(p.numel() for p in model.parameters())
@@ -157,7 +157,8 @@ def main():
             break
 
     # --- final evaluation ---
-    model.load_state_dict(torch.load(os.path.join(out, "best.pt"), map_location=device)["model"])
+    model.load_state_dict(torch.load(os.path.join(out, "best.pt"), map_location=device,
+                                     weights_only=False)["model"])
     summary = {"config": cfg, "best_epoch": best_epoch, "val_mean_skill": best_skill,
                "n_params_M": n_params / 1e6, "splits": {"train": int(len(tr_idx)),
                "val": int(len(va_idx)), "test": int(len(te_idx))}}

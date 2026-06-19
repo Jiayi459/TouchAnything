@@ -24,3 +24,6 @@ augment: true
 noise: 0.01
 scale: 0.1
 hflip: true
+
+# predict change from last observed frame (persistence == zero delta)
+residual: true

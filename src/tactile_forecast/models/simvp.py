@@ -24,9 +24,10 @@ class ConvSC(nn.Module):
 
 
 class SimVP(nn.Module):
-    def __init__(self, in_ch=2, t_in=10, t_out=15, hid=64, n_enc=2, n_trans=4, k=3):
+    def __init__(self, in_ch=2, t_in=10, t_out=15, hid=64, n_enc=2, n_trans=4, k=3, residual=True):
         super().__init__()
         self.in_ch, self.t_in, self.t_out, self.hid = in_ch, t_in, t_out, hid
+        self.residual = residual
         enc = [ConvSC(in_ch, hid, k)] + [ConvSC(hid, hid, k) for _ in range(n_enc - 1)]
         self.enc = nn.Sequential(*enc)
         trans = [ConvSC(t_in * hid, t_out * hid, k)]
@@ -43,5 +44,8 @@ class SimVP(nn.Module):
         z = self.trans(z)                                  # (B, t_out*hid, H, W)
         z = z.reshape(B * self.t_out, self.hid, H, W)
         z = self.dec(z)
-        o = torch.relu(self.head(z))                       # non-negative pressure
-        return o.reshape(B, self.t_out, C, H, W)
+        r = self.head(z).reshape(B, self.t_out, C, H, W)
+        if self.residual:
+            # predict change from the last observed frame (persistence == zero delta)
+            return torch.clamp(x[:, -1:] + r, 0.0, 1.0)
+        return torch.relu(r)                               # non-negative pressure

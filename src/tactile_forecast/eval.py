@@ -31,7 +31,7 @@ def main():
     args = ap.parse_args()
 
     device = resolve_device(args.device)
-    sd = torch.load(args.ckpt, map_location=device)
+    sd = torch.load(args.ckpt, map_location=device, weights_only=False)
     cfg = sd["cfg"]
     cfg["in_ch"] = 2
     data_root = args.data_root or DATA_ROOTS[args.scope]

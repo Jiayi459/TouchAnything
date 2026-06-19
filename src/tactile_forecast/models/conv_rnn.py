@@ -49,9 +49,10 @@ def _make_cell(kind, in_ch, hid, k):
 
 
 class ConvRNNSeq2Seq(nn.Module):
-    def __init__(self, cell="gru", in_ch=2, hid=64, layers=2, k=3, t_out=15):
+    def __init__(self, cell="gru", in_ch=2, hid=64, layers=2, k=3, t_out=15, residual=True):
         super().__init__()
         self.t_out = t_out
+        self.residual = residual
         cells = []
         ch = in_ch
         for _ in range(layers):
@@ -79,7 +80,10 @@ class ConvRNNSeq2Seq(nn.Module):
         outs = []
         for t in range(t_out):
             top, states = self._step(inp, states)
-            o = torch.relu(self.readout(top))  # pressure is non-negative
+            r = self.readout(top)
+            # residual: predict the change from the current frame (persistence == zero delta);
+            # else predict the absolute frame. Clamp/ReLU keep pressure in a valid range.
+            o = torch.clamp(inp + r, 0.0, 1.0) if self.residual else torch.relu(r)
             outs.append(o)
             if self.training and y is not None and float(torch.rand(())) < ssprob:
                 inp = y[:, t]            # scheduled sampling: teacher forcing

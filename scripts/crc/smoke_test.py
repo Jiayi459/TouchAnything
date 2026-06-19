@@ -21,10 +21,11 @@ dev = "cuda" if torch.cuda.is_available() else "cpu"
 print("device:", dev, "| cuda:", torch.cuda.is_available())
 
 mask_np = np.zeros((C, H, W), np.float32)
-mask_np[:, 2:19, 2:19] = 1.0                                   # fake sensor mask
-mask = torch.from_numpy(mask_np).to(dev)
-x = (torch.rand(B, t_in, C, H, W, device=dev)) * mask
-y = (torch.rand(B, t_out, C, H, W, device=dev)) * mask
+mask_np[:, 2:19, 2:19] = 1.0                                   # fake sensor mask (C,H,W)
+mask_cw = torch.from_numpy(mask_np).to(dev)                    # (C,H,W) for metrics
+mask_b = mask_cw.unsqueeze(0).expand(B, -1, -1, -1).contiguous()  # (B,C,H,W) as the dataloader yields
+x = (torch.rand(B, t_in, C, H, W, device=dev)) * mask_cw
+y = (torch.rand(B, t_out, C, H, W, device=dev)) * mask_cw
 inv = (lambda a: a)
 
 for name in ["convgru", "convlstm", "simvp"]:
@@ -34,7 +35,7 @@ for name in ["convgru", "convlstm", "simvp"]:
     opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
     pred = model(x, y=y, ssprob=0.5)
     assert pred.shape == (B, t_out, C, H, W), (name, pred.shape)
-    loss = engine.masked_mse(pred, y, mask, active_weight=3.0)
+    loss = engine.masked_mse(pred, y, mask_b, active_weight=3.0)
     loss.backward(); opt.step()
     assert torch.isfinite(loss), name
     assert (pred >= 0).all(), f"{name} produced negative pressure"

@@ -17,15 +17,23 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--videos", action="store_true",
                    help="also download the *.mp4 video files (full ~88.5 GB pull)")
+    p.add_argument("--pressure-only", action="store_true",
+                   help="download ONLY pressure_grids.npz (+ split.json), ~1.7 GB; "
+                        "enough for tactile->tactile pretraining")
     p.add_argument("--workers", type=int, default=8)
     args = p.parse_args()
 
-    ignore = None if args.videos else ["*.mp4"]
+    allow = ignore = None
+    if args.pressure_only:
+        allow = ["*/*/*/pressure_grids.npz", "split.json"]
+    elif not args.videos:
+        ignore = ["*.mp4"]
     os.makedirs(DEST, exist_ok=True)
     path = snapshot_download(
         repo_id=REPO_ID,
         repo_type="dataset",
         local_dir=DEST,
+        allow_patterns=allow,
         ignore_patterns=ignore,
         max_workers=args.workers,
     )

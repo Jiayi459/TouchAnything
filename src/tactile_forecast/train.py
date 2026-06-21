@@ -36,6 +36,13 @@ DATA_ROOTS = {
     "full": os.path.join("datasets", "EgoTouch"),
 }
 
+# The 8 core grasp/hold/lift tasks. Exclude these when pretraining on the full
+# dataset so a LOTO held-out object is never seen during pretraining (no leakage).
+GRASP_TASKS = [
+    "grasp_body_lotion", "grasp_cola", "grasp_floral_water", "grasp_power_adapter",
+    "grasp_sunscreen", "grip_hand_dynamometer", "hold_teapot", "lift_towel",
+]
+
 
 def resolve_device(arg):
     if arg == "auto":
@@ -61,6 +68,9 @@ def main():
     ap.add_argument("--scope", choices=["grasp", "full"], default="grasp")
     ap.add_argument("--data-root", default=None)
     ap.add_argument("--pretrain", action="store_true", help="train on all data, no test split")
+    ap.add_argument("--exclude-grasp", action="store_true",
+                    help="drop the 8 grasp/hold/lift tasks (use when pretraining, to keep the "
+                         "grasp fine-tune/LOTO test truly unseen)")
     ap.add_argument("--pretrained", default=None, help="checkpoint to init weights from")
     ap.add_argument("--out", default=None)
     ap.add_argument("--epochs", type=int, default=None)
@@ -86,6 +96,11 @@ def main():
     mask = U.load_or_build_mask(data_root, cache=os.path.join(data_root, "sensor_mask.npy"))
     fwd, inv = U.make_transform(cfg.get("transform", "log1p"), cfg.get("alpha", 10.0))
     trajs = U.list_trajectories(data_root)
+    if args.exclude_grasp:
+        ex = set(GRASP_TASKS)
+        n0 = len(trajs)
+        trajs = [(p, t) for (p, t) in trajs if t not in ex]
+        print(f"[data] excluded grasp tasks: {n0} -> {len(trajs)} trajectories")
     tasks = [t for _, t in trajs]
     clips = preload_clips(trajs, mask, fwd)
     print(f"[data] {len(trajs)} trajectories, {sum(c.shape[0] for c in clips)} frames")

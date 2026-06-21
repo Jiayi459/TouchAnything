@@ -18,3 +18,5 @@ dependencies:
       - scikit-image      # SSIM / image metrics
       - einops
       - pyyaml
+      - huggingface_hub   # for scripts/download_egotouch.py (pretraining data)
+      - hf_xet

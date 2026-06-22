@@ -1,0 +1,27 @@
+#!/bin/bash
+# UGE GPU batch job: pretrain SimVP on all NON-grasp trajectories (self-supervised
+# next-frame tactile), for later fine-tuning on the grasp subset.
+# Submit from the repo root after `mkdir -p logs`:  qsub scripts/crc/pretrain_gpu.job
+#$ -M netid@nd.edu          # <-- replace netid
+#$ -m abe
+#$ -q gpu                   # GPU queue (4-day limit)
+#$ -l gpu_card=1
+#$ -pe smp 8
+#$ -N tactile_pretrain
+#$ -cwd
+#$ -o logs/
+#$ -e logs/
+
+set -eo pipefail
+conda activate tactile
+
+python - <<'PY'
+import torch
+print("CUDA:", torch.cuda.is_available(),
+      torch.cuda.get_device_name(0) if torch.cuda.is_available() else "NO GPU")
+PY
+
+# Larger stride + batch keep pretraining fast (361k windows@stride5 -> ~90k@stride20).
+python -m src.tactile_forecast.train --config configs/tactile/simvp.yaml \
+    --scope full --pretrain --exclude-grasp --out runs/simvp_pretrain \
+    --epochs 30 --stride 20 --batch-size 256 --num-workers 4

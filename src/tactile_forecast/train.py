@@ -74,6 +74,8 @@ def main():
     ap.add_argument("--pretrained", default=None, help="checkpoint to init weights from")
     ap.add_argument("--out", default=None)
     ap.add_argument("--epochs", type=int, default=None)
+    ap.add_argument("--stride", type=int, default=None, help="override window stride (cfg)")
+    ap.add_argument("--batch-size", type=int, default=None, help="override batch size (cfg)")
     ap.add_argument("--device", default="auto")
     ap.add_argument("--num-workers", type=int, default=4)
     ap.add_argument("--max-windows", type=int, default=0, help="cap windows for a smoke test")
@@ -84,7 +86,14 @@ def main():
         cfg = yaml.safe_load(f)
     if args.epochs is not None:
         cfg["epochs"] = args.epochs
+    if args.stride is not None:
+        cfg["stride"] = args.stride
+    if args.batch_size is not None:
+        cfg["batch_size"] = args.batch_size
     device = resolve_device(args.device)
+    if device == "cpu":
+        print("[WARN] running on CPU — for training, use a GPU node (qrsh/qsub), "
+              "not the CRC front-end.")
     torch.manual_seed(args.seed); np.random.seed(args.seed)
 
     data_root = args.data_root or DATA_ROOTS[args.scope]

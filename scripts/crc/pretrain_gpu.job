@@ -2,9 +2,11 @@
 # UGE GPU batch job: pretrain SimVP on all NON-grasp trajectories (self-supervised
 # next-frame tactile), for later fine-tuning on the grasp subset.
 # Submit from the repo root after `mkdir -p logs`:  qsub scripts/crc/pretrain_gpu.job
-#$ -M jhao3@nd.edu          # <-- replace netid
+# NOTE: no inline comments on #$ lines — UGE treats the rest of the line as the argument.
+# GPU queue has a 4-day limit.
+#$ -M jhao3@nd.edu
 #$ -m abe
-#$ -q gpu                   # GPU queue (4-day limit)
+#$ -q gpu
 #$ -l gpu_card=1
 #$ -pe smp 8
 #$ -N tactile_pretrain

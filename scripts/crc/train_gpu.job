@@ -2,11 +2,12 @@
 # UGE GPU job for ND CRC. Submit from the repo root after `mkdir -p logs`:
 #   qsub scripts/crc/train_gpu.job
 # Pass variables, e.g.:  qsub -v FOLD=0,CONFIG=configs/tactile/convgru.yaml scripts/crc/train_gpu.job
+# NOTE: no inline comments on #$ lines — UGE treats the rest of the line as the argument.
 #$ -M jhao3@nd.edu
 #$ -m abe
-#$ -q gpu                   # GPU queue (4-day limit)
-#$ -l gpu_card=1            # request 1 GPU
-#$ -pe smp 8               # CPU cores for dataloading
+#$ -q gpu
+#$ -l gpu_card=1
+#$ -pe smp 8
 #$ -N tactile_train
 #$ -cwd
 #$ -o logs/

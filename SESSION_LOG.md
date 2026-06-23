@@ -185,8 +185,70 @@ as extensions.
 - ACTION PENDING user choice: either implement TAU (`models/tau.py` + DDR in engine + tau.yaml)
   OR edit plan wording "SimVP/TAU" → "SimVP" to match code.
 
+### CRC RUN LOG
+- 2026-06-19: Pushed full pipeline to fork (7e3bec0). User cloned on crcfe01.
+- **Fix (fff1db7):** `setup_crc_env.sh` aborted on `set -u` — CRC `/etc/bashrc` has unbound
+  `BASHRCSOURCED`. Removed `set -u`; now sources `$(conda info --base)/etc/profile.d/conda.sh`
+  directly instead of `conda init`+`.bashrc`. Env `tactile` had not been created; gave user
+  manual create commands + the fixed script.
+
+### FIRST TRAINING RESULT + FIX (2026-06-19)
+- Smoke test passed on GPU (A10, cuda True) after two harness fixes: smoke mask must be batched
+  (B,C,H,W) [3a05619]; `horizon_metrics` mask cast to bool [65f1d64].
+- First real run (ConvGRU, LTO fold0, grasp, no pretrain): pipeline OK end-to-end but **test
+  mean-skill ≈ 0.0038 ≈ break-even with persistence** (skill@h ~0.01→0). Training loss *rose*
+  over epochs under scheduled sampling. Diagnosis: models predict ABSOLUTE frames → easiest
+  optimum is to copy last frame (= persistence). Persistence is very strong (probe: autocorr
+  0.99@33ms).
+- **Fix [390861c]: residual prediction** — models output Δ from last observed frame
+  (`pred=clamp(last+Δ,0,1)`); persistence == zero delta, so skill comes from learned deviations.
+  `residual` flag (default true) in ConvGRU/ConvLSTM/SimVP + configs. Also silenced torch.load
+  weights_only warning. Awaiting rerun to confirm positive skill.
+
+### RESIDUAL RESULT CONFIRMED (2026-06-19)
+- ConvGRU, LTO fold0, grasp, no pretrain, residual=on: **test mean-skill = 0.174** vs persistence
+  (last_vel −2.4). skill@h: h1=−0.04 (persistence near-unbeatable at 33ms), rising monotonically
+  to h15=+0.25. => Future tactile IS predictable from past beyond persistence; gain grows with
+  horizon over 0.5s. Caveat: single fold (test=17). Added `scripts/aggregate_results.py`
+  [2e706c2] for mean±std across folds.
+
+### LTO 5-FOLD CV RESULTS (grasp, no pretrain, residual on) — 2026-06-19
+(2h runtime was recurrent models' Python time-loop, not a hang; completed fine.)
+- ConvGRU : 0.138 ± 0.056 (h1=-0.090, h15=+0.207)
+- ConvLSTM: 0.152 ± 0.031 (h1=+0.036, h15=+0.211)
+- **SimVP : 0.192 ± 0.044 (h1=+0.065, h15=+0.235) — BEST at every horizon**
+=> Conclusive: future tactile predictable from past beyond persistence (~19% error reduction
+   over 0.5s). SimVP (non-recurrent) beats both recurrent models AND is far faster; recurrent
+   models weak/negative at h1. **Promote SimVP to primary** (overturns prior ConvGRU pref).
+   Fold 2 hardest for all (likely long grip_hand_dynamometer test split).
+
+### LOTO RESULT (SimVP, grasp, no pretrain) — 2026-06-21
+- **SimVP LOTO = +0.005 ± 0.111** (per-fold -0.131..+0.151). vs LTO +0.192.
+- KEY FINDING: grasp-only learned tactile dynamics are **object-specific** — do NOT generalize
+  to unseen objects (mean ≈ persistence; some folds worse). Motivates pretraining.
+
+### PRETRAIN->FINETUNE SETUP [092ea63]
+- train.py `--exclude-grasp`: drop the 8 grasp tasks during pretrain so LOTO held-out object is
+  never seen (no leakage). download_egotouch.py `--pressure-only` (~1.7GB npz). env += hf_hub.
+- Workflow: download --pressure-only -> pretrain SimVP --scope full --pretrain --exclude-grasp
+  (~1848 traj) -> finetune --protocol loto --pretrained ... --out runs/simvp_ft_grasp_loto_fN.
+- Compare `simvp_ft | grasp | loto` vs baseline `simvp | grasp | loto` (+0.005).
+
+### PRETRAIN DONE (2026-06-22)
+- First attempt ran on CPU front-end (device=cpu, 361k windows) -> stuck 13h; killed. Cause:
+  ran on crcfe01 (no GPU). Fix: qsub GPU batch job + stride20/batch256 [60a49ab]; also fixed
+  UGE inline-comment bug on `#$ -M` [6b93fb8].
+- Pretrain (SimVP, scope full, --exclude-grasp = 1851 traj, 30 epochs, GPU) completed in ~5h
+  (slow due to per-epoch val eval over ~62k windows). best.pt @ epoch23, val_skill 0.227 on
+  held-out NON-grasp data => good general tactile predictor. -> runs/simvp_pretrain/best.pt
+
 ### PENDING
-- Run on CRC: `setup_crc_env.sh` → `smoke_test.py` → pretrain (full) → fine-tune LTO/LOTO CV.
+- Fine-tune from pretrain: LOTO 8-fold -> runs/simvp_ft_grasp_loto_fN; compare vs baseline
+  simvp loto (+0.005). Optional LTO-finetune. Then visualization + results writeup.
+- Possible perf TODO: speed up engine.evaluate (memory-heavy concat) if rerunning pretrain.
+- Set up pretrain-on-full (1,930 traj) → finetune (needs full npz on CRC: rsync or add HF
+  downloader). Minor: h1 slightly negative (model adds noise at easiest horizon) — possible
+  later tweak (per-horizon loss weighting).
 - Commit decision: Session 2/3 artifacts (categorize script, tactile prep/probe scripts, plan,
   src/tactile_forecast, configs, crc setup) — not yet committed/pushed to the fork.
 - [ ] Set `git user.name`/`user.email` (name from gh login; email jh9141@nyu.edu).

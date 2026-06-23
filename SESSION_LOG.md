@@ -242,10 +242,19 @@ as extensions.
   (slow due to per-epoch val eval over ~62k windows). best.pt @ epoch23, val_skill 0.227 on
   held-out NON-grasp data => good general tactile predictor. -> runs/simvp_pretrain/best.pt
 
-### PENDING
-- Fine-tune from pretrain: LOTO 8-fold -> runs/simvp_ft_grasp_loto_fN; compare vs baseline
-  simvp loto (+0.005). Optional LTO-finetune. Then visualization + results writeup.
-- Possible perf TODO: speed up engine.evaluate (memory-heavy concat) if rerunning pretrain.
+### HEADLINE RESULT (2026-06-23) — pretraining unlocks unseen-object prediction
+- SimVP LOTO: scratch **+0.005 ± 0.111** -> pretrained->finetuned **+0.097 ± 0.122** (~18x,
+  positive at all horizons; helped 6/8 held-out objects; fold5 stays ~-0.20 outlier).
+- Full story: (1) tactile predictable from past (LTO +0.192); (2) doesn't generalize from few
+  objects (LOTO scratch ~0); (3) broad multi-object pretrain enables it (LOTO +0.097).
+- Documented in `docs/RESULTS.md` [aa7e49d]. CORE STUDY COMPLETE.
+
+### OPTIONAL NEXT
+- Visualization: predicted-vs-GT pressure GIFs (eval-based renderer).
+- Ablations: LTO-finetune (does pretrain help seen-object too?); smaller SimVP (30.5M is
+  over-param); investigate fold5 outlier object.
+- Perf: speed up engine.evaluate (memory-heavy concat) if rerunning pretrain.
+- rsync runs/ back to local for plots.
 - Set up pretrain-on-full (1,930 traj) → finetune (needs full npz on CRC: rsync or add HF
   downloader). Minor: h1 slightly negative (model adds noise at easiest horizon) — possible
   later tweak (per-horizon loss weighting).

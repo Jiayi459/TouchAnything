@@ -526,3 +526,22 @@ next=OpenTouch, depth=probe-first (training-free, no GPU), where=CRC.
   - NEW scripts/crc/download_opentouch.sh (26 shard IDs + labels, verbatim from opentouch repo).
 - NEXT: download all shards, run probe → full OpenTouch per-category + temporal-pattern ranking;
   compare to EgoTouch by the B-axis.
+
+### OPENTOUCH FULL RESULT (2026-07-02) — 26 shards, 2496 usable / 2958 clips (457 unlabeled)
+- Raw-action ranking (trustworthy): TOP pouring +4.4 / serving +3.6 / eating +3.4 / stirring +3.0
+  / scooping +2.5 / flipping +2.4 / wiping +1.3; BOTTOM cutting(n4) -3.0 / moving -2.6 / turning
+  -2.2 / pulling -1.8. Standouts have persH15 0.26-0.39 vs pack 0.7-0.9.
+- contact_migration ≈ 0.005 for ALL categories (single-hand grasp footprint never breaks) →
+  DEGENERATE metric here; PI driven by persH15 + periodicity.
+- CROSS-DATASET SURPRISE: OpenTouch temporal-pattern ranks B4>B2>B1 — OPPOSITE of EgoTouch (B1 high).
+  Cause: a-priori verb→pattern map breaks (turning-a-latch != rhythmic turn; many OT verbs unmapped
+  → "Other" holds predictable food actions; Pour mislabeled B3). LESSON: assign Axis B per-action
+  from data, not a-priori.
+- DURABLE FINDING (answers user's "trait" goal): predictable = smooth continuous slowly-varying
+  contact force (pour/stir/scoop/serve/wipe/slice); unpredictable = abrupt onset / make-break
+  engagement (press/plug/pull/move/tap/stiff-turn). persH15 = sensor-agnostic predictor.
+- Documented in docs/ACTION_CATEGORIES.md §3b. docs/predictability_opentouch.csv written on CRC.
+- OPEN: (a) expand taxonomy to OT vocab (stir/serve/eat/flip/examine/carry/lower/align/type/touch/
+  tighten/unscrew/tilt/tap/feel/inspect/switch/detach/attach/point/rest) + re-derive Axis B
+  empirically; (b) then ActionSense + Force-Vision same recipe; (c) optional GPU forecasting to
+  confirm probe on OpenTouch.

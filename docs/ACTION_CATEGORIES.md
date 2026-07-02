@@ -88,6 +88,34 @@ Full table incl. temporal-pattern grouping: `docs/predictability_by_category_ful
 
 ---
 
+## 3b. OpenTouch result (full, 2,496 clips) — and a cross-dataset surprise
+
+OpenTouch = single-hand 16×16, in-the-wild object manipulation (pull handle, press button,
+turn latch, pick up items in stores/kitchens). `contact_migration ≈ 0.005` for *every* category
+(a grasping hand's footprint never breaks), so it is degenerate here — PI is driven by
+`persH15` (raw forecastability) + periodicity.
+
+**By raw action (the trustworthy signal), easiest → hardest:**
+`pouring +4.4 · serving +3.6 · eating +3.4 · stirring +3.0 · scooping +2.5 · flipping +2.4 ·
+wiping +1.3` … `pulling −1.8 · turning −2.2 · moving −2.6 · cutting(n=4) −3.0`.
+The standouts (pour/serve/eat/scoop/stir) have `persH15 ≈ 0.26–0.39` vs the pack at 0.7–0.9.
+
+**Cross-dataset TRAIT (the real answer to "what is suitable for prediction"):**
+In BOTH datasets the most-predictable actions share one trait — **smooth, continuous, slowly
+varying contact force**: EgoTouch slice/wipe/spray, OpenTouch pour/stir/scoop/serve/wipe. The
+least-predictable share the opposite — **abrupt force onsets / make-or-break engagement**:
+press/click, plug/insert, pull, move, tap, stiff-latch turning. `persH15` (how slowly the
+tactile signal decorrelates) is the sensor-agnostic predictor of forecastability.
+
+**Why the a-priori temporal-pattern (Axis B) table diverges across datasets** (OpenTouch ranks
+B4>B2>B1, EgoTouch ranked B1 high): the fixed verb→pattern map breaks because (i) the *same verb
+differs by context* — "turning" a stiff latch (OpenTouch, high error) is an abrupt transition,
+not the rhythmic turn the a-priori B1 assumed; (ii) many OpenTouch verbs (stir, serve, eat,
+flip, examine, carry…) are still unmapped → dumped in "Other" (which is why "Other" scores high —
+it holds predictable food actions); (iii) `Pour` (pour/scoop, very predictable) was pre-labeled
+B3-ramp and pooled with unpredictable pull/push/slide. LESSON: Axis B must be assigned *per
+action from the data*, not a-priori; the durable finding is the trait above, not the B-label.
+
 ## 4. Findings
 
 1. **Repeatable/periodic surface actions are the most predictable.** `Cut` (slicing) dominates on

@@ -40,7 +40,8 @@ VERB_CATEGORY = OrderedDict([
     ("bounce", "Swing/Throw/Strike"), ("hit", "Swing/Throw/Strike"),
     ("toss", "Swing/Throw/Strike"), ("practice", "Swing/Throw/Strike"),
     ("play", "Play (games/sports)"),
-    ("wash", "Wash/Clean"), ("clean", "Wash/Clean"),
+    ("wash", "Wash/Clean"), ("clean", "Wash/Clean"), ("wipe", "Wash/Clean"),
+    ("scrub", "Wash/Clean"),
     ("buy", "Buy/Shop"), ("shop", "Buy/Shop"),
     ("cook", "Cook/Prepare"), ("brew", "Cook/Prepare"), ("mix", "Cook/Prepare"),
     ("make", "Cook/Prepare"), ("prepare", "Cook/Prepare"),
@@ -49,7 +50,9 @@ VERB_CATEGORY = OrderedDict([
     ("arrange", "Organize/Arrange"), ("pack", "Organize/Arrange"),
     ("unpack", "Organize/Arrange"), ("assemble", "Organize/Arrange"),
     ("move", "Organize/Arrange"),
-    ("cut", "Cut"),
+    ("cut", "Cut"), ("slice", "Cut"), ("peel", "Cut"), ("chop", "Cut"),
+    ("pour", "Pour"), ("scoop", "Pour"),
+    ("adjust", "Organize/Arrange"),
     ("deflate", "Inflate/Deflate"), ("inflate", "Inflate/Deflate"),
     ("use", "Use tool/appliance"), ("work", "Use tool/appliance"),
     # --- leftover / misc verbs ---
@@ -82,6 +85,7 @@ TEMPORAL_PATTERN = {
     "Cook/Prepare":           "B5 composite",
     "Organize/Arrange":       "B5 composite",
     "Cut":                    "B1 periodic",
+    "Pour":                   "B3 ramp/slide",
     "Inflate/Deflate":        "B3 ramp/slide",
     "Use tool/appliance":     "B5 composite",
     "Buy/Shop":               "B5 composite",
@@ -94,6 +98,40 @@ def categorize(task_name: str) -> str:
     for tok in task_name.split("_"):
         if tok in VERB_CATEGORY:
             return VERB_CATEGORY[tok]
+    return "Other"
+
+
+def _stems(tok: str):
+    """Candidate base forms of an inflected verb token (gerund/past/plural).
+
+    Handles: pulling->pull, placing->plac->place, cutting->cutt->cut (doubled),
+    turned->turn, pushes->push.
+    """
+    tok = tok.lower().strip(".,;:!?\"'()[]")
+    forms = {tok}
+    for suf in ("ing", "ed", "es", "s"):
+        if tok.endswith(suf) and len(tok) - len(suf) >= 2:
+            base = tok[: -len(suf)]
+            forms.add(base)
+            forms.add(base + "e")               # plac+e, mov+e, wip+e
+            if len(base) >= 2 and base[-1] == base[-2]:
+                forms.add(base[:-1])            # cutt->cut, runn->run
+    return forms
+
+
+def categorize_phrase(text: str) -> str:
+    """Categorize a free-text action phrase (e.g. 'picking up', 'pulling').
+
+    Tokenizes on whitespace and inflection-normalizes each token, so datasets that
+    label actions as gerunds (OpenTouch, ActionSense) land in the same category space
+    as EgoTouch's verb_object task names. First known verb wins.
+    """
+    if not text:
+        return "Other"
+    for tok in text.replace("/", " ").replace("-", " ").split():
+        for form in _stems(tok):
+            if form in VERB_CATEGORY:
+                return VERB_CATEGORY[form]
     return "Other"
 
 

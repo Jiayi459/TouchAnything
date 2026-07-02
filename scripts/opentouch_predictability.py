@@ -28,7 +28,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src.tactile_forecast.categories import categorize, TEMPORAL_PATTERN  # noqa: E402
+from src.tactile_forecast.categories import categorize_phrase, TEMPORAL_PATTERN  # noqa: E402
 from src.tactile_forecast import predictability as P  # noqa: E402
 
 KEY_CANDIDATES = ("key", "scene_clip", "scene::clip", "clip_id", "clip", "clip_name")
@@ -153,7 +153,7 @@ def main():
                 if not m:
                     continue
                 action = (row.get("action") or "unknown").strip() or "unknown"
-                cat = categorize(action)
+                cat = categorize_phrase(action)
                 by_action[action].append(m)
                 by_category[cat].append(m)
                 by_pattern[TEMPORAL_PATTERN.get(cat, "Other")].append(m)

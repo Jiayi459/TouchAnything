@@ -503,3 +503,26 @@ next=OpenTouch, depth=probe-first (training-free, no GPU), where=CRC.
   1 shard, measure), then either (a) fits → download all + probe, (b) too big → build a
   streaming driver (gdown shard → per-shard probe → delete → next) or request scratch from
   crcsupport. Decide after the size gauge.
+
+### OPENTOUCH VALIDATED ON CRC (2026-07-02)
+- GAUGE: 1 shard (office_csail_p2.hdf5) = 561 MB → 26 shards ≈ 14.6 GB → FITS in 35 GB home.
+  No streaming/scratch needed. Download-all approved.
+- SCHEMA CONFIRMED live: HDF5 top keys {calibration, data, transform_slam_to_rgb}; `data/<clip>`
+  has right_pressure (T,16,16) f32 max=3072, camera_poses, rgb_images_jpeg, hand_landmarks,
+  timestamps, plus a per-clip `labels`=(0,0) index-pair (NOT the action). Labels come from
+  final_annotation.zip → `final_annotations/<scene>_merged.csv`, key col `clip_id` =
+  "<scene>::demo_NNN" (globally unique), cols incl. action (gerund), grip_type (GRASP taxonomy),
+  object_category, environment, description, peak_idx. One row per clip.
+- FIRST PROBE (1 shard, 111/113 usable, 0 unlabeled → join works): grip-type ranking sensible
+  (Prismatic-3-Finger/Medium-Wrap easiest; Prismatic-4-Finger/Index-Extension hardest). Action
+  vocab = gerunds: placing/adjusting/removing/pinching/picking up/holding/pulling/pushing/moving/
+  pressing/turning. Category/pattern were all "Other" (gerund mismatch) — FIXED:
+  - categories.py: added `categorize_phrase()` (inflection stemmer: pulling→pull, cutting→cut,
+    placing→place, picking up→pick) + new verbs (slice/peel/chop→Cut, pour/scoop→Pour[new,B3],
+    wipe/scrub→Wash/Clean, adjust→Organize). Left EgoTouch `categorize()` + the `spread`→Fold/Cloth
+    mapping UNCHANGED (no silent shift to the running EgoTouch sweep).
+  - opentouch_predictability.py now uses categorize_phrase; verified all 20 observed/likely verbs
+    map to the right category+pattern (only "removing"→Other).
+  - NEW scripts/crc/download_opentouch.sh (26 shard IDs + labels, verbatim from opentouch repo).
+- NEXT: download all shards, run probe → full OpenTouch per-category + temporal-pattern ranking;
+  compare to EgoTouch by the B-axis.

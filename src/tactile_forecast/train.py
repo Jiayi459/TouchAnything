@@ -28,6 +28,7 @@ from torch.utils.data import DataLoader
 
 from . import baselines, engine
 from . import tactile_utils as U
+from .categories import categorize
 from .data import TactileWindows, preload_clips, split_train_val
 from .models import build_model
 
@@ -71,6 +72,9 @@ def main():
     ap.add_argument("--exclude-grasp", action="store_true",
                     help="drop the 8 grasp/hold/lift tasks (use when pretraining, to keep the "
                          "grasp fine-tune/LOTO test truly unseen)")
+    ap.add_argument("--category", default=None,
+                    help="keep only trajectories whose task maps to this action category "
+                         "(see src/tactile_forecast/categories.py). For per-category forecasting.")
     ap.add_argument("--pretrained", default=None, help="checkpoint to init weights from")
     ap.add_argument("--out", default=None)
     ap.add_argument("--epochs", type=int, default=None)
@@ -97,7 +101,14 @@ def main():
     torch.manual_seed(args.seed); np.random.seed(args.seed)
 
     data_root = args.data_root or DATA_ROOTS[args.scope]
-    out = args.out or os.path.join("runs", f"{cfg['name']}_{args.scope}_{args.protocol}_f{args.fold}")
+    cat_tag = ""
+    if args.category:
+        slug = "".join(c if c.isalnum() else "-" for c in args.category.lower()).strip("-")
+        while "--" in slug:
+            slug = slug.replace("--", "-")
+        cat_tag = f"_{slug}"
+    out = args.out or os.path.join(
+        "runs", f"{cfg['name']}_{args.scope}{cat_tag}_{args.protocol}_f{args.fold}")
     os.makedirs(out, exist_ok=True)
     print(f"[cfg] {cfg['name']} | device={device} | scope={args.scope} | root={data_root} | out={out}")
 
@@ -110,6 +121,13 @@ def main():
         n0 = len(trajs)
         trajs = [(p, t) for (p, t) in trajs if t not in ex]
         print(f"[data] excluded grasp tasks: {n0} -> {len(trajs)} trajectories")
+    if args.category:
+        n0 = len(trajs)
+        trajs = [(p, t) for (p, t) in trajs if categorize(t) == args.category]
+        if not trajs:
+            raise SystemExit(f"[data] no trajectories in category {args.category!r} under {data_root}")
+        ntasks = len({t for _, t in trajs})
+        print(f"[data] category={args.category!r}: {n0} -> {len(trajs)} trajectories, {ntasks} tasks")
     tasks = [t for _, t in trajs]
     clips = preload_clips(trajs, mask, fwd)
     print(f"[data] {len(trajs)} trajectories, {sum(c.shape[0] for c in clips)} frames")

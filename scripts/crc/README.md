@@ -96,8 +96,50 @@ rsync -avz netid@crcfe01.crc.nd.edu:~/TouchAnything/runs/ ./runs/
 Each run writes `best.pt`, `train_log.csv`, `test_metrics.csv`, `summary.json`. Headline =
 **mean skill vs persistence** (must be > 0).
 
+## 6. Per-category predictability study (the current experiment)
+
+Goal: measure the real **skill-over-persistence per action category** and confirm/break the
+training-free ranking in `docs/ACTION_CATEGORIES.md` (probe says: Cut/Spray/Wash easiest,
+Press/Click & holds hardest). Needs the **full** EgoTouch npz tree (`--scope full`).
+
+```bash
+# --- (A) stage code (fork not set up yet -> rsync the working tree), from LOCAL repo root ---
+rsync -avz --exclude '.git' --exclude '.venv' --exclude 'datasets' --exclude 'runs' \
+      ./ NETID@crcfe01.crc.nd.edu:~/TouchAnything/
+
+# --- (B) stage ONLY the pressure grids of full EgoTouch to scratch (forecaster reads just
+#         pressure_grids.npz; dir names carry the task label for --category) ---
+# on CRC:
+mkdir -p /scratch365/$USER/egotouch && ln -sfn /scratch365/$USER/egotouch ~/TouchAnything/datasets
+# from LOCAL (only *.npz, preserving scene/task/traj structure):
+rsync -avz --prune-empty-dirs --include='*/' --include='pressure_grids.npz' --exclude='*' \
+      datasets/EgoTouch/ NETID@crcfe01.crc.nd.edu:/scratch365/NETID/egotouch/EgoTouch/
+
+# --- (C) env + smoke test (once) --- (see step 2-3 above for details)
+cd ~/TouchAnything && bash scripts/crc/setup_crc_env.sh
+qrsh -q gpu -l gpu_card=1     # then in the shell: conda activate tactile; python scripts/crc/smoke_test.py; exit
+
+# --- (D) submit the sweep (9 categories x 5 folds = 45 SimVP jobs) ---
+mkdir -p logs
+bash scripts/crc/run_percategory.sh
+#   swap model:   CONFIG=configs/tactile/convgru.yaml bash scripts/crc/run_percategory.sh
+#   subset:       CATS="Cut Grasp/Hold/Lift Press/Click" FOLDS="0 1 2" bash scripts/crc/run_percategory.sh
+qstat -u $USER            # qw=queued, r=running ;  qdel JOBID to cancel
+
+# --- (E) collect: pull runs back + ranked per-category table ---
+# from LOCAL:
+rsync -avz NETID@crcfe01.crc.nd.edu:~/TouchAnything/runs/ ./runs/
+python scripts/aggregate_results.py        # prints "PER-CATEGORY RANKING" (headline)
+```
+
+Run dirs: `runs/simvp_full_<slug>_lto_f<fold>/summary.json`. `aggregate_results.py` parses the
+`<slug>` and prints a per-category ranking by mean test skill — compare its order to the probe PI.
+
 ## Notes
 - The repo's top-level `environment.yaml` (full DINOv2/xformers stack) is **not** needed here —
   `environment_tactile_cuda.yaml` is the lean env.
 - Bump the torch/cu124 pin in `setup_crc_env.sh` if the cluster driver needs a newer CUDA.
+- `--category` filters by the verb taxonomy in `src/tactile_forecast/categories.py`; LTO (default)
+  is the right protocol for cross-category comparison. LOTO needs ≥2 tasks in a category
+  (Spray/Cut/Pinch have 1–2 → LTO only).
 - Support: crcsupport@nd.edu.

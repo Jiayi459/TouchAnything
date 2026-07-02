@@ -5,63 +5,18 @@ category by scanning its name tokens left-to-right for the first known action ve
 (task names follow a verb_object convention). Core grasp categories are flagged.
 """
 import os
-from collections import defaultdict, OrderedDict
+import sys
+from collections import defaultdict
+
+# Single source of truth for the taxonomy lives in the tactile_forecast package so
+# train.py and this script agree. Add repo root to path for the local (torch-free) import.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.tactile_forecast.categories import (  # noqa: E402
+    VERB_CATEGORY, CORE_GRASP, categorize)
 
 ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                     "datasets", "EgoTouch")
 SCENES = ["Home", "Office", "Outdoor", "Retail", "Workbench"]
-
-# Ordered verb -> category. First matching token (scanning left to right) wins.
-VERB_CATEGORY = OrderedDict([
-    # --- CORE GRASP (suitable for grasping an item) ---
-    ("grasp", "Grasp/Hold/Lift"), ("grip", "Grasp/Hold/Lift"),
-    ("hold", "Grasp/Hold/Lift"), ("lift", "Grasp/Hold/Lift"),
-    ("pick", "Pick-up"),
-    # --- other manipulations ---
-    ("put", "Place/Put-down"), ("place", "Place/Put-down"),
-    ("take", "Take/Retrieve"),
-    ("push", "Push/Pull/Drag/Slide"), ("pull", "Push/Pull/Drag/Slide"),
-    ("drag", "Push/Pull/Drag/Slide"), ("slide", "Push/Pull/Drag/Slide"),
-    ("open", "Open/Close"), ("close", "Open/Close"), ("unfold", "Open/Close"),
-    ("fold", "Fold/Cloth"), ("spread", "Fold/Cloth"), ("wring", "Fold/Cloth"),
-    ("plug", "Plug/Unplug/Insert"), ("unplug", "Plug/Unplug/Insert"),
-    ("insert", "Plug/Unplug/Insert"),
-    ("squeeze", "Squeeze"),
-    ("pinch", "Pinch"),
-    ("twist", "Twist/Turn/Rotate"), ("turn", "Twist/Turn/Rotate"),
-    ("rotate", "Twist/Turn/Rotate"),
-    ("press", "Press/Click"), ("click", "Press/Click"),
-    ("spray", "Spray"),
-    ("swing", "Swing/Throw/Strike"), ("throw", "Swing/Throw/Strike"),
-    ("bounce", "Swing/Throw/Strike"), ("hit", "Swing/Throw/Strike"),
-    ("toss", "Swing/Throw/Strike"), ("practice", "Swing/Throw/Strike"),
-    ("play", "Play (games/sports)"),
-    ("wash", "Wash/Clean"), ("clean", "Wash/Clean"),
-    ("buy", "Buy/Shop"), ("shop", "Buy/Shop"),
-    ("cook", "Cook/Prepare"), ("brew", "Cook/Prepare"), ("mix", "Cook/Prepare"),
-    ("make", "Cook/Prepare"), ("prepare", "Cook/Prepare"),
-    ("boil", "Cook/Prepare"), ("collect", "Cook/Prepare"),
-    ("organize", "Organize/Arrange"), ("sort", "Organize/Arrange"),
-    ("arrange", "Organize/Arrange"), ("pack", "Organize/Arrange"),
-    ("unpack", "Organize/Arrange"), ("assemble", "Organize/Arrange"),
-    ("move", "Organize/Arrange"),
-    ("cut", "Cut"),
-    ("deflate", "Inflate/Deflate"), ("inflate", "Inflate/Deflate"),
-    ("use", "Use tool/appliance"), ("work", "Use tool/appliance"),
-    # --- leftover / misc verbs ---
-    ("flip", "Other"), ("write", "Other"), ("change", "Other"),
-    ("handle", "Other"), ("remove", "Other"), ("remote", "Other"),
-    ("over", "Other"),
-])
-
-CORE_GRASP = {"Grasp/Hold/Lift", "Pick-up"}
-
-
-def categorize(task_name):
-    for tok in task_name.split("_"):
-        if tok in VERB_CATEGORY:
-            return VERB_CATEGORY[tok]
-    return "Other"
 
 
 def main():

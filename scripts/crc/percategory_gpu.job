@@ -1,0 +1,47 @@
+#!/bin/bash
+# UGE GPU job: per-CATEGORY tactile forecasting on the full EgoTouch data.
+# Trains + Leave-Trajectory-Out CV within ONE action category, to MEASURE the actual
+# skill-over-persistence per category and confirm the training-free ranking in
+# docs/ACTION_CATEGORIES.md (hypothesis: Cut/Spray/Wash easiest, Press/Click hardest).
+#
+# Submit from repo root after `mkdir -p logs` and staging the full EgoTouch npz tree.
+# One category, one fold:
+#   qsub -v CATEGORY=Cut,FOLD=0,CONFIG=configs/tactile/simvp.yaml scripts/crc/percategory_gpu.job
+# All categories x 5 folds (bash loop on the front-end):
+#   CATS=("Cut" "Spray" "Wash/Clean" "Grasp/Hold/Lift" "Press/Click" "Pick-up" "Squeeze")
+#   for c in "${CATS[@]}"; do for f in 0 1 2 3 4; do
+#     qsub -v CATEGORY="$c",FOLD=$f,CONFIG=configs/tactile/simvp.yaml scripts/crc/percategory_gpu.job
+#   done; done
+# NOTE: no inline comments on #$ lines — UGE treats the rest of the line as the argument.
+#$ -M jhao3@nd.edu
+#$ -m abe
+#$ -q gpu
+#$ -l gpu_card=1
+#$ -pe smp 8
+#$ -N tactile_percat
+#$ -cwd
+#$ -o logs/
+#$ -e logs/
+
+set -euo pipefail
+
+# Activate env directly (per CRC docs: do NOT `module load conda` inside a job)
+conda activate tactile
+
+echo "Host: $(hostname)  JOB_ID: ${JOB_ID:-NA}  CATEGORY: ${CATEGORY:-NA}  FOLD: ${FOLD:-NA}"
+python - <<'PY'
+import torch
+print("CUDA available:", torch.cuda.is_available())
+print("Device:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "none")
+PY
+
+if [ -z "${CATEGORY:-}" ]; then echo "ERROR: set CATEGORY via -v"; exit 2; fi
+
+# Per-category forecasting on the full EgoTouch scope, LTO by default.
+# --scope full  -> datasets/EgoTouch ; --category filters trajectories by verb taxonomy.
+python -m src.tactile_forecast.train \
+    --config "${CONFIG:-configs/tactile/simvp.yaml}" \
+    --scope full \
+    --category "${CATEGORY}" \
+    --protocol "${PROTOCOL:-lto}" \
+    --fold "${FOLD:-0}"

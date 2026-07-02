@@ -263,3 +263,213 @@ as extensions.
 - [ ] Set `git user.name`/`user.email` (name from gh login; email jh9141@nyu.edu).
 - [ ] `gh repo fork Jianyi2004/TouchAnything` → re-point origin to fork, upstream to original.
 - [ ] Commit 4 files, push to fork (publishing — proceed only after auth confirmed).
+
+---
+
+## Session 4 — 2026-07-01 — New direction: which ACTION CATEGORY is most predictable (cross-dataset)
+
+### Goal (user request)
+Read three tactile/force datasets, enumerate every action collected, categorize actions (by
+force type / movement pattern / etc.), then run per-category prediction to find **which category
+of action is easiest to predict** — or at least summarize the *traits* of an action series that
+make it predictable. Priors given by user: (a) actions with a **standard procedure** are easier
+to predict; (b) actions with a **repeatable/periodic pattern** are easier. Ultimate goal: use the
+predictor to give the user **feedback / adaptive strategies** to improve performance.
+
+This is a NEW research thread built on the existing tactile→tactile forecasting infra
+(`src/tactile_forecast`, skill-over-persistence metric, LTO/LOTO protocols). Session 1-3
+established: LTO seen-object +0.192; LOTO unseen ~0; pretrain→finetune LOTO +0.097.
+
+### Datasets read (2026-07-01) — sources
+1. **OpenTouch** (opentouch-tactile.github.io, arXiv 2512.16842). First in-the-wild egocentric
+   FULL-HAND tactile dataset. Modalities @30Hz: FPC-based tactile sensor + Meta Aria egocentric
+   video + Rokoko Smartgloves hand pose; 2ms sync. 5.1h recordings, ~2,900 curated clips,
+   ~800 objects, 14 environments, 14 object categories. Labels per clip: object name, object
+   category, environment, **action type**, **grasp type** (29 grasps from GRASP taxonomy:
+   e.g. Medium Wrap, Small Diameter, Prismatic Two-Finger, Index-Finger Extension), NL caption.
+   Action examples named in text: pressing, rotating, turning, button click, grasping; contact
+   with chair/table/transparent objects. Full action list is in Supp. Mat. (not enumerated on
+   arXiv HTML; would need supp PDF).
+2. **Force–Vision / "Learning to Jointly Understand Visual and Tactile Signals"** (ICLR 2024,
+   Li/Liu et al., extends GEM). Cross-modal force+vision on **articulated tools**. Sensor:
+   Sundaram et al. STAG-style tactile glove (full-hand NORMAL force map) + webcam. Scale:
+   **2,000,000 paired frames over 89 real object instances** (scissors, staplers, clips/clamps,
+   pliers, spray bottles, ...). Manipulation types explicitly analyzed: **press, hold, squeeze**.
+   Key finding they report: "press" clusters apart from "hold"/"squeeze" — press activates a
+   *contiguous* hand region and is *one-directional*; squeeze/hold create *force closure* → the
+   two force-closure actions are more similar to each other. (Directly relevant to our
+   force-type axis.)
+3. **ActionSense** (NeurIPS 2022 D&B, MIT CSAIL). Multimodal WEARABLE kitchen dataset.
+   Modalities: custom conductive-thread tactile gloves + Myo EMG (forearm muscle) + 17-IMU Xsens
+   body tracking + finger gloves + Pupil eye-tracking w/ first-person cam + 5 RGB + depth + 2 mic.
+   **20 unique activity labels in 6 task categories** (Fig 2), ~7+ subjects. The 6 categories:
+   (i) Peeling & slicing (cucumber/potato/bread; + auxiliary "clear cutting board"),
+   (ii) Spreading (almond butter / jelly on bread w/ knife),
+   (iii) Wiping (pan/plate w/ towel or sponge — periodic circular/linear strokes, force key),
+   (iv) Open/close a jar (rotational, subtle, tactile+EMG key),
+   (v) Pouring water (monotonically changing container weight; transparent liquid),
+   (vi) High-level tableware sequences (set table; load/unload dishwasher; stacking).
+   NOTE full 20 leaf labels live in Fig 2 / supp (not machine-readable from the main-text PDF).
+
+### Existing repo datasets already in this taxonomy
+- **EgoTouch** (21×21 pressure grid) — general in-the-wild tactile (used for pretraining).
+- **grasp_hold_lift_tactile** — 8 tasks: grasp_body_lotion, grasp_cola, grasp_floral_water,
+  grasp_power_adapter, grasp_sunscreen, grip_hand_dynamometer, hold_teapot, lift_towel.
+  These are ALL sustained-grip/hold/lift = one corner of the proposed taxonomy (explains why
+  LOTO≈0: near-static maps where persistence is already strong → low skill headroom).
+
+### PROPOSED unified action taxonomy (draft — for user review)
+Categorize along orthogonal axes; each concrete action = a point in this space.
+
+**Axis A — Force type / contact mechanics**
+- A1 Sustained force-closure grip/hold (grasp_*, hold_teapot, jar-hold, FV "hold"/"squeeze")
+- A2 Impulsive one-directional press (button click, FV "press", stapler)
+- A3 Cyclic surface force (wiping, spreading, slicing strokes, peeling strokes, scrubbing)
+- A4 Torsional / rotational (open/close jar, turn knob, OpenTouch "rotating"/"turning")
+- A5 Monotonic ramp load (pouring — weight ↓; lifting — load ↑; squeeze-to-close)
+- A6 Precision fingertip (pinch, click, fine slice)
+
+**Axis B — Movement / temporal pattern** (this is the predictability-driving axis)
+- B1 Periodic / rhythmic-repeatable (wiping, slicing, peeling, spreading) → hypothesis HIGH skill
+- B2 Quasi-static / near-constant (hold, grip, sustained press) → low MSE but LOW *skill* (persistence wins)
+- B3 Monotonic ramp (pouring, lifting) → MEDIUM
+- B4 Discrete one-shot transition (button click, jar-open "snap", pick-place onset) → LOW
+- B5 Composite long-horizon sequence (set table, load dishwasher) → LOW (planning + many sub-actions)
+
+**Axis C — Procedural standardization** (user prior)
+- C-high: standardized (regular slicing strokes, standard jar twist, standard pour tilt)
+- C-low: free-form/adaptive (wiping strategy, spreading adapts to substance, tableware planning)
+
+**Axis D — Contact spatial dynamics of the tactile map**
+- D1 Stable footprint (same taxels active) — grip/hold/press → spatially trivial
+- D2 Migrating/sliding contact (wiping, slicing, peeling) — contact region translates
+- D3 Making/breaking contact (pick-place, click) — onset/offset hardest
+
+### Predictability hypothesis (to TEST, ranked most→least "skill-over-persistence")
+1. B1 periodic surface actions (A3×B1×D2): structured motion persistence CAN'T capture → highest skill.
+2. A4 rotational / B3 monotonic ramps: some learnable trend → medium.
+3. A1/B2 sustained holds: low raw error but ~0 skill (persistence already near-perfect).
+4. B4 discrete events / B5 long sequences: lowest (event timing / planning).
+This predicts the user's priors partly REVERSE under a skill-over-persistence metric: "easy to
+hold steady" ≠ "high forecasting skill." Must pin down the metric (OPEN Q1).
+
+### OPEN QUESTIONS (must resolve before any implementation — plan-before-code)
+- **Q1 — Definition of "easier to predict."** Raw accuracy (MSE/IoU/force-MAE) vs.
+  **skill-over-persistence** (structured, learnable dynamics)? These rank categories differently
+  (static holds win #1 on raw error but ~0 on skill). RECOMMEND: report both; headline on
+  skill-over-persistence since that's where feedback/adaptive strategies have leverage.
+- **Q2 — Which dataset(s) for this iteration?** ActionSense is the cleanest labeled *everyday-action*
+  taxonomy with tactile time-series (best fit). OpenTouch adds action+grasp labels; force-vision
+  adds press/hold/squeeze. Do we have download access? (EgoTouch was downloaded metadata-only;
+  ActionSense/OpenTouch/FV not yet fetched, and their tactile sensor geometries differ from the
+  21×21 EgoTouch grid → new preprocessing per dataset.)
+- **Q3 — Prediction target / modality.** Continue tactile→tactile forecasting (reuse infra), or
+  predict a force scalar, or cross-modal (vision/pose→tactile)? "Feedback to enhance performance"
+  hints we may want to compare a user's applied force to a learned "ideal" template.
+- **Q4 — Category granularity.** Use the proposed A/B/C/D axes (recommend B as primary grouping),
+  or a flatter user-defined category set?
+- **Q5 — Scope of THIS step.** Deliver categorization + study design only (await answers), or also
+  stand up a first per-category forecasting run on whatever tactile data is already local?
+
+### ANSWERS (user, 2026-07-01)
+- Q1 = **Both, skill as headline** (report MSE/IoU/force-MAE + skill; rank by skill-over-persistence).
+- Q2 = **All three datasets** — produce ONE unified categorization spanning ActionSense + OpenTouch
+  + Force-Vision (+ local EgoTouch/grasp).
+- Q3 = tactile / **physical-representation prediction** (predict the tactile physical signal;
+  reuse tactile→tactile forecasting representation).
+- Q5 = **Also prototype now.**
+
+### CONSTRAINT REALITY CHECK
+- torch NOT installable on this Windows box → cannot TRAIN here (training runs live on CRC GPU).
+- Only EgoTouch (21×21 grids) + grasp_hold_lift tactile are downloaded locally; ActionSense /
+  OpenTouch / Force-Vision raw data NOT local (different sensor geometries → per-dataset preprocessing later).
+- ∴ "Prototype now" = a **training-free predictability probe** (numpy only) grouped BY CATEGORY over
+  local EgoTouch. Directly measures "which category is most predictable" without a GPU. Existing
+  `scripts/tactile_predictability_probe.py` (persistence nMSE, autocorr, smoothness) + 
+  `scripts/categorize_actions.py` (verb→category) are the building blocks — MERGE them.
+
+### PLAN (this step)
+1. `scripts/predictability_by_category.py` — for every EgoTouch trajectory: categorize (verb map)
+   + map to a **temporal-pattern class (Axis B)**, load pressure_grids.npz (L+R, nan→0), compute
+   per-sequence: persistence nMSE (RAW hardness), constant-velocity nMSE, **velocity-skill vs
+   persistence** (learnable first-order dynamics headroom = skill proxy), **periodicity score**
+   (max total-force autocorr at lag 10–45 = rhythmic/repeatable evidence), **contact-migration**
+   (1−IoU of active-taxel mask across h). Aggregate & RANK by category and by B-class. Write CSV.
+2. `docs/ACTION_CATEGORIES.md` — unified cross-dataset taxonomy table mapping every ActionSense /
+   OpenTouch / Force-Vision / EgoTouch action into Axes A(force)/B(temporal)/C(standardization)/
+   D(contact-dynamics), with the per-category predictability numbers attached where measurable.
+3. Interpret: does empirical velocity-skill/periodicity confirm the hypothesis (B1 periodic >
+   ramps > holds > events)? Feed into the feedback/adaptive-strategy goal.
+
+### IMPLEMENTATION (2026-07-01)
+- Wrote `scripts/predictability_by_category.py` (numpy/venv only; imports `categorize` from
+  `categorize_actions.py`). Per EgoTouch trajectory: persistence nMSE @h={1,5,15,30}, periodicity
+  (max total-force autocorr, lag 10–45 frames), contact_migration (1−IoU active-taxel mask @h15).
+  Composite `PI = z(−persH15)+z(periodicity)+z(−migr15)`. Groups by verb category AND temporal
+  pattern (Axis B); ranks; writes `docs/predictability_by_category.csv`.
+- DISCARDED a constant-velocity skill proxy: `h·velocity` extrapolation blows up on impulsive
+  tactile spikes (velSk ≈ −15..−37), noise-dominated → not a valid training-free skill proxy.
+  A real skill-over-persistence number needs the GPU forecaster. Documented in script docstring.
+- Ran `--max-per-task 12` → 1,493 sequences.
+
+### RESULTS (probe, EgoTouch, n=1493) — ranked easiest→hardest (PI)
+- Easiest: **Cut/slice** PI+6.11 (persH15 0.088, periodicity 0.968, migr 0.215) >> Take +2.84 >
+  Inflate +2.57 > **Spray** +2.38 > **Wash/Clean (wipe)** +2.31.
+- Hardest: **Press/Click** −7.14 (persH15 1.399, migr 0.689) < Pinch −4.51 < Plug/Insert −3.82 <
+  Fold −2.62 < Push/Pull −2.27 < Squeeze −1.98 < **Grasp/Hold/Lift −1.57**.
+- FINDINGS: (1) periodic surface actions (cut/spray/wipe) most predictable — CONFIRMS "repeatable
+  pattern" prior + B1 hypothesis. (2) make/break-contact events (press/click, plug) hardest —
+  CONFIRMS B4/D3. (3) NUANCE refuting naive view: sustained HOLDS are NOT trivially predictable
+  (Grasp/Hold/Lift below median, worst persH30=1.223) — grips drift + footprint unstable; explains
+  grasp-only LOTO≈0. (4) periodicity predicts forecastability better than procedural standardization.
+- Small-n caveat on top categories (Cut/Spray n=10). Next: full run (`--max-per-task 0`), then
+  CONFIRM by running `src/tactile_forecast` per-category on CRC GPU (probe PI = the hypothesis).
+
+### DELIVERABLES this session
+- `docs/ACTION_CATEGORIES.md` — unified cross-dataset taxonomy (ActionSense+OpenTouch+Force-Vision
+  +EgoTouch) mapped into Axes A/B/C/D + empirical predictability table + feedback-target implication
+  (B1-periodic actions are the good feedback targets: they have a "correct rhythm/force template").
+- `scripts/predictability_by_category.py`, `docs/predictability_by_category.csv`.
+- Saved OpenTouch/ActionSense/Force-Vision paper PDFs were parsed via pypdf (pdftoppm/Read-PDF
+  unavailable on Windows) to extract exact taxonomies.
+
+### FOLLOW-UP (a) FULL-DATA PROBE + (b) PER-CATEGORY FORECASTER (2026-07-01/02)
+User: "do a and b".
+- (a) Ran probe `--max-per-task 0` → **1,929 sequences**. Ranking reproduces the sampled run
+  almost exactly (Cut PI +6.02, Take +2.90, Inflate +2.62, Spray +2.46, Wash +2.37; bottom:
+  Press/Click −6.67, Plug/Insert −4.86, Pinch −4.17, Fold −2.34, Push/Pull −2.28, Squeeze −2.11,
+  Grasp/Hold/Lift −2.08). → ranking is ROBUST to sampling. Wrote `docs/predictability_by_category_full.csv`.
+- (b) Wired the REAL forecaster for per-category confirmation:
+  - NEW `src/tactile_forecast/categories.py` = single source of truth (VERB_CATEGORY, CORE_GRASP,
+    categorize, TEMPORAL_PATTERN, all_categories). Pure stdlib (both `src/__init__.py` and
+    `src/tactile_forecast/__init__.py` are torch-free, so local scripts can import it).
+  - Refactored `scripts/categorize_actions.py` to import from that module (adds repo root to
+    sys.path) — removes the duplicated verb map. Verified it still runs (212 tasks / 1930 traj).
+  - `src/tactile_forecast/train.py`: added `--category NAME` (filters trajectories by
+    categorize(task)); run-dir now carries a slug tag (`simvp_full_<slug>_lto_f<fold>`).
+  - NEW `scripts/crc/percategory_gpu.job` (UGE) takes `-v CATEGORY,FOLD,CONFIG,PROTOCOL`; trains
+    LTO within one category on `--scope full`. Header has the all-categories×5-folds submit loop.
+  - Verified (torch-free): `--category` filter + slug over real data → every category has ≥5
+    trajectories (5-fold LTO viable); slugs clean. py_compile passes on all edited files.
+- Doc `docs/ACTION_CATEGORIES.md` updated with full-data table + §5 confirmation-run instructions.
+- STATE: cannot train locally (no torch). CRC run is the remaining step to turn the probe
+  HYPOTHESIS (PI ranking) into MEASURED per-category skill. All artifacts uncommitted (fork not set up).
+
+### CRC STAGING + AGGREGATION (2026-07-02)
+User: "stage the CRC commands". Also confirmed prediction methods = 3 architectures.
+- METHODS (verified in `models/__init__.py` build_model): **ConvGRU**, **ConvLSTM** (both
+  `ConvRNNSeq2Seq`, cell gru/lstm), **SimVP** (`simvp.py`, headline). Plus 2 non-learned baselines
+  in eval (persistence, last_velocity). **TAU is NOT implemented** — this SimVP is "SimVP-lite"
+  (Conv translator, n_trans=4), not the gated Temporal Attention Unit. TAU would be a translator
+  swap if we want it; noted as optional.
+- BUG FIXED: `scripts/aggregate_results.py` DIR_RE could not parse per-category run dirs
+  (`simvp_full_cut_lto_f0`) → those runs were silently skipped. Rewrote regex to capture an
+  optional slug `(?:_(?P<category>[^_]+(?:-[^_]+)*))?`; unit-tested on 7 dir names incl. the
+  existing `simvp_ft_grasp_loto_f5`. Aggregator now groups by category and prints a
+  **PER-CATEGORY RANKING** (mean test skill) — the study headline that confirms/breaks the probe PI.
+- NEW `scripts/crc/run_percategory.sh` — one-command sweep (9 categories × 5 folds = 45 SimVP
+  jobs; CONFIG/CATS/FOLDS overridable). CATS list uses only space-free category names (slashes ok).
+- `scripts/crc/README.md` §6 — full staging walkthrough: (A) rsync working tree, (B) rsync ONLY
+  `pressure_grids.npz` of full EgoTouch to /scratch365 + symlink, (C) env+smoke, (D) submit sweep,
+  (E) rsync runs back + `aggregate_results.py`. Uses NETID placeholder (CRC netid = jhao3).
+- Ready to run on CRC. I cannot submit (no CRC/SSH/torch here) — user launches it.

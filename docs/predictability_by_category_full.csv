@@ -1,0 +1,30 @@
+grouping,group,n,pers_nmse_h1,pers_nmse_h15,pers_nmse_h30,periodicity,contact_migration,predictability_index
+temporal_pattern,Other,44,0.02783,0.36159,0.53449,0.78625,0.32884,4.7804
+temporal_pattern,B5 composite,411,0.03524,0.48142,0.74237,0.74589,0.39889,2.0503
+temporal_pattern,B1 periodic,144,0.03431,0.49336,0.77299,0.69793,0.42803,0.6568
+temporal_pattern,B4 transition,1032,0.03743,0.61579,0.96846,0.69743,0.46424,-0.8519
+temporal_pattern,B3 ramp/slide,211,0.05054,0.71590,1.00154,0.60912,0.46237,-3.0974
+temporal_pattern,B2 quasi-static,87,0.04566,0.73634,1.33936,0.65324,0.52719,-3.5383
+action_category,Cut,10,0.00961,0.08828,0.12614,0.96822,0.21451,6.0248
+action_category,Take/Retrieve,30,0.02064,0.34641,0.56508,0.86850,0.34731,2.8967
+action_category,Inflate/Deflate,14,0.02207,0.30443,0.40657,0.79091,0.32072,2.6234
+action_category,Spray,10,0.01571,0.32027,0.56066,0.88422,0.41512,2.4586
+action_category,Wash/Clean,21,0.03201,0.29434,0.43161,0.77058,0.33179,2.3698
+action_category,Other,44,0.02783,0.36159,0.53449,0.78625,0.32884,2.2959
+action_category,Cook/Prepare,46,0.02664,0.35467,0.64417,0.80631,0.35304,2.2590
+action_category,Play (games/sports),57,0.02851,0.36807,0.53673,0.77075,0.35456,1.8805
+action_category,Use tool/appliance,131,0.04484,0.48288,0.73717,0.76604,0.39336,1.0413
+action_category,Buy/Shop,37,0.02735,0.47251,0.67023,0.78303,0.42380,0.9277
+action_category,Place/Put-down,47,0.02494,0.48673,0.77189,0.77885,0.44735,0.6062
+action_category,Twist/Turn/Rotate,41,0.03787,0.49556,0.79081,0.70524,0.39413,0.4490
+action_category,Open/Close,130,0.03373,0.53183,0.82869,0.70240,0.43286,-0.0902
+action_category,Organize/Arrange,140,0.03390,0.57020,0.88229,0.68724,0.43060,-0.3405
+action_category,Pick-up,635,0.03318,0.58369,1.01283,0.72334,0.46658,-0.4253
+action_category,Swing/Throw/Strike,81,0.04009,0.53118,0.56900,0.57824,0.36166,-0.4833
+action_category,Grasp/Hold/Lift,82,0.04017,0.72406,1.34289,0.65976,0.52534,-2.0760
+action_category,Squeeze,100,0.05712,0.73580,1.10301,0.58408,0.45656,-2.1080
+action_category,Push/Pull/Drag/Slide,97,0.04786,0.75477,0.98280,0.60870,0.48881,-2.2774
+action_category,Fold/Cloth,62,0.03972,0.65257,1.01542,0.59484,0.51957,-2.3369
+action_category,Pinch,5,0.13571,0.93778,1.28146,0.54632,0.55753,-4.1697
+action_category,Plug/Unplug/Insert,89,0.06062,1.02739,1.30283,0.53526,0.58449,-4.8574
+action_category,Press/Click,20,0.13687,1.39903,1.66522,0.59919,0.68948,-6.6683

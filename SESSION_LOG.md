@@ -473,3 +473,33 @@ User: "stage the CRC commands". Also confirmed prediction methods = 3 architectu
   `pressure_grids.npz` of full EgoTouch to /scratch365 + symlink, (C) env+smoke, (D) submit sweep,
   (E) rsync runs back + `aggregate_results.py`. Uses NETID placeholder (CRC netid = jhao3).
 - Ready to run on CRC. I cannot submit (no CRC/SSH/torch here) — user launches it.
+
+### SCOPE EXPANSION: all 4 datasets, probe-first, OpenTouch next (2026-07-02)
+User: not grasp-focused (clarified: EgoTouch sweep already ranks ALL 23 categories, grasp is
+just one). Wants which category is predictable ACROSS all 4 datasets. Decisions (AskUserQuestion):
+next=OpenTouch, depth=probe-first (training-free, no GPU), where=CRC.
+- DATA AVAILABILITY (checked): all 4 downloadable. OpenTouch = public Google-Drive via
+  `scripts/download_data.sh` (26 HDF5 shards + `final_annotations` labels). ActionSense =
+  public (delpreto/ActionNet, CC-BY-NC, HDF5). Force-Vision = public Google-Drive zip.
+- CROSS-SENSOR CAVEAT: EgoTouch 21x21 2-hand / OpenTouch 16x16 1-hand / ActionSense
+  conductive-thread / FV STAG differ → CANNOT compare raw skill across datasets. Design: rank
+  WITHIN each dataset, then pool by TEMPORAL-PATTERN axis (B1..B5) to test if the same action
+  KIND wins everywhere (sensor-agnostic answer). OpenTouch `action` free-text is mapped through
+  the SAME categorize() verb taxonomy → lands in the same category/pattern space as EgoTouch.
+- OPENTOUCH SCHEMA (verbatim from repo build_label_data.py): HDF5 `data/<clip_id>/right_pressure`
+  = (T,16,16); labels in CSV/TSV keyed by clip id, cols object_name/object_category/environment/
+  action/grip_type. 30 Hz. Pressure raw up to ~3072 (scale-invariant metrics → no normalization).
+- BUILT:
+  - NEW `src/tactile_forecast/predictability.py` — shared numpy metrics (seq_metrics, aggregate,
+    add_predictability_index) for ANY (T,C,H,W) sensor. Sanity-tested (periodic→period 1.0,
+    static→migr 0.0, event→period 0.0). EgoTouch probe left with its inline copy (don't disturb
+    the committed/running script); shared module is go-forward, used by OpenTouch probe.
+  - NEW `scripts/opentouch_predictability.py` — `--inspect` (dump HDF5 tree + label cols + join
+    rate) and probe modes; groups by temporal-pattern / mapped-category / raw-action / grip_type;
+    writes docs/predictability_opentouch.csv. Robust: auto-detect HDF5 clip groups + label key col.
+  - Both compile; h5py 3.15.1 present locally.
+- OPEN RISK — DISK: OpenTouch HDF5 bundles RGB (`rgb_images_jpeg`) → shards likely large; CRC
+  home only 35G free and /scratch365/jhao3 not provisioned. PLAN: gauge size (download labels +
+  1 shard, measure), then either (a) fits → download all + probe, (b) too big → build a
+  streaming driver (gdown shard → per-shard probe → delete → next) or request scratch from
+  crcsupport. Decide after the size gauge.

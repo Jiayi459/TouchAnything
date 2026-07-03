@@ -108,6 +108,10 @@ def main():
     ap.add_argument("--extract-states", default=None,
                     help="also save analytic physical-state trajectory per clip to this dir "
                          "(state_N.npy + manifest.jsonl) for the v1 forecaster")
+    ap.add_argument("--save-clips-for", default=None,
+                    help="comma-separated label substrings; save the raw resampled (T,C,H,W) "
+                         "clip (float16) as clip_N.npy for matching activities (cache for local "
+                         "re-processing). Requires --extract-states.")
     ap.add_argument("--out", default=os.path.join("docs", "predictability_actionsense.csv"))
     args = ap.parse_args()
     import csv
@@ -115,6 +119,7 @@ def main():
 
     # physical-state extraction (append across streamed files)
     sdir = args.extract_states
+    clip_filters = [s.strip() for s in args.save_clips_for.split(",")] if args.save_clips_for else []
     s_manifest = None
     s_n = 0
     if sdir:
@@ -220,12 +225,16 @@ def main():
                 if jf:
                     jf.write(json.dumps({"label": label, "cat": cat, "pat": pat, "m": m}) + "\n")
                 if s_manifest is not None:
-                    st = PS.clip_states(clip).astype("float32")  # (T, C, 6)
+                    st = PS.clip_states(clip).astype("float32")  # (T, C, 6), baseline-corrected
                     np.save(os.path.join(sdir, f"state_{s_n}.npy"), st)
+                    saved_clip = False
+                    if clip_filters and any(sub in label for sub in clip_filters):
+                        np.save(os.path.join(sdir, f"clip_{s_n}.npy"), clip.astype("float16"))
+                        saved_clip = True
                     s_manifest.write(json.dumps({
                         "idx": s_n, "label": label, "cat": cat,
                         "fps": args.target_fps, "T": int(st.shape[0]),
-                        "features": list(PS.FEATURES)}) + "\n")
+                        "features": list(PS.FEATURES), "has_clip": saved_clip}) + "\n")
                     s_manifest.flush()
                     s_n += 1
                 n_ok += 1

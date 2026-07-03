@@ -38,7 +38,7 @@ for URL in "${URLS[@]}"; do
     echo "  WARN: download failed (disk? net?), skipping"; rm -f "$f"; continue
   fi
   python "$PROBE" --data-dir "$DEST" --jsonl "$ACC" --extract-states "$DEST/states" \
-      || echo "  WARN: probe error on this file"
+      --save-clips-for "Pour,Slice" || echo "  WARN: probe error on this file"
   rm -f "$f"                          # reclaim space before the next download
 done
 

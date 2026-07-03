@@ -56,9 +56,27 @@ def frame_state(field: np.ndarray) -> np.ndarray:
     return out
 
 
-def clip_states(clip: np.ndarray) -> np.ndarray:
-    """clip: (T, C, H, W) -> (T, C, 6) raw physical-moment trajectory."""
+def baseline_correct(clip: np.ndarray, pct: float = 5.0) -> np.ndarray:
+    """Remove the static per-taxel DC baseline (sensor offset + sustained rest load).
+
+    Conductive-thread / resistive tactile gloves are not tared: every taxel has a large
+    resting value, so raw total-force and center-of-pressure are dominated by the offset
+    (F ≈ const, CoP pinned to center). Subtract the per-taxel low-percentile-over-time
+    value and clip at 0, leaving the *dynamic contact* that carries the motion.
+    """
+    clip = np.asarray(clip, dtype=np.float32)
+    base = np.percentile(clip, pct, axis=0, keepdims=True)  # (1,C,H,W) per taxel
+    return np.clip(clip - base, 0.0, None)
+
+
+def clip_states(clip: np.ndarray, baseline_pct: float | None = 5.0) -> np.ndarray:
+    """clip: (T, C, H, W) -> (T, C, 6) physical-moment trajectory.
+
+    baseline_pct: per-taxel percentile subtracted as the DC baseline (None to disable).
+    """
     clip = np.asarray(clip)
+    if baseline_pct is not None:
+        clip = baseline_correct(clip, baseline_pct)
     return np.stack([frame_state(clip[t]) for t in range(clip.shape[0])], axis=0)
 
 

@@ -100,9 +100,58 @@ def main():
     ap.add_argument("--target-fps", type=int, default=30)
     ap.add_argument("--min-frames", type=int, default=35)
     ap.add_argument("--inspect", action="store_true")
+    ap.add_argument("--jsonl", default=None,
+                    help="append per-clip records here (streaming, one file at a time)")
+    ap.add_argument("--report-only", action="store_true",
+                    help="skip HDF5; aggregate an existing --jsonl and print/write CSV")
     ap.add_argument("--out", default=os.path.join("docs", "predictability_actionsense.csv"))
     args = ap.parse_args()
+    import csv
+    import json
+
+    def report(by_activity, by_category, by_pattern):
+        def show(title, groups, min_n=1):
+            rows = P.add_predictability_index(P.aggregate(
+                {g: l for g, l in groups.items() if len(l) >= min_n}))
+            print(f"===== {title} (ranked by predictability_index, higher=easier) =====")
+            hdr = (f"{'group':<48}{'n':>5}{'persH1':>8}{'persH15':>9}{'persH30':>9}"
+                   f"{'period':>8}{'migr15':>8}{'PI':>7}")
+            print(hdr); print("-" * len(hdr))
+            for g in sorted(rows, key=lambda g: -rows[g]["pi"]):
+                r = rows[g]
+                print(f"{g[:47]:<48}{r['n']:>5}{r['pers_nmse_h1']:>8.3f}{r['pers_nmse_h15']:>9.3f}"
+                      f"{r['pers_nmse_h30']:>9.3f}{r['periodicity']:>8.3f}"
+                      f"{r['contact_migration']:>8.3f}{r['pi']:>7.2f}")
+            print()
+            return rows
+        pat_rows = show("BY TEMPORAL-PATTERN CLASS (Axis B)", by_pattern)
+        cat_rows = show("BY ACTION CATEGORY (mapped via verb taxonomy)", by_category)
+        act_rows = show("BY RAW ACTIONSENSE ACTIVITY", by_activity)
+        os.makedirs(os.path.dirname(args.out), exist_ok=True)
+        with open(args.out, "w", newline="") as fh:
+            w = csv.writer(fh)
+            w.writerow(["grouping", "group", "n", *P.METRIC_KEYS, "predictability_index"])
+            for gname, rows in [("temporal_pattern", pat_rows), ("action_category", cat_rows),
+                                ("raw_activity", act_rows)]:
+                for g, r in sorted(rows.items(), key=lambda kv: -kv[1]["pi"]):
+                    w.writerow([gname, g, r["n"], *[f"{r[k]:.5f}" for k in P.METRIC_KEYS],
+                                f"{r['pi']:.4f}"])
+        print(f"[done] wrote {args.out}")
+
+    if args.report_only:
+        ba, bc, bp = P.new_group_dict(), P.new_group_dict(), P.new_group_dict()
+        with open(args.jsonl) as fh:
+            for line in fh:
+                r = json.loads(line)
+                ba[r["label"]].append(r["m"]); bc[r["cat"]].append(r["m"])
+                bp[r["pat"]].append(r["m"])
+        n = sum(len(v) for v in ba.values())
+        print(f"aggregating {n} clips from {args.jsonl}\n")
+        report(ba, bc, bp)
+        return
+
     import h5py
+    jf = open(args.jsonl, "a") if args.jsonl else None
 
     files = sorted(glob.glob(os.path.join(args.data_dir, "**", "*.hdf5"), recursive=True))
     print(f"HDF5 files: {len(files)} under {args.data_dir!r}")
@@ -150,42 +199,20 @@ def main():
                 if not m:
                     continue
                 cat = categorize_phrase(label)
+                pat = TEMPORAL_PATTERN.get(cat, "Other")
                 by_activity[label].append(m)
                 by_category[cat].append(m)
-                by_pattern[TEMPORAL_PATTERN.get(cat, "Other")].append(m)
+                by_pattern[pat].append(m)
+                if jf:
+                    jf.write(json.dumps({"label": label, "cat": cat, "pat": pat, "m": m}) + "\n")
                 n_ok += 1
         print(f"  {os.path.basename(fp)}: cumulative usable clips={n_ok}")
+    if jf:
+        jf.close()
+        print(f"\nappended {n_ok} clips (of {n_iv} intervals) -> {args.jsonl}")
+        return
     print(f"\nactivity intervals={n_iv}  usable(T>={args.min_frames})={n_ok}\n")
-
-    def show(title, groups, min_n=1):
-        rows = P.add_predictability_index(P.aggregate(
-            {g: l for g, l in groups.items() if len(l) >= min_n}))
-        print(f"===== {title} (ranked by predictability_index, higher=easier) =====")
-        hdr = f"{'group':<48}{'n':>5}{'persH1':>8}{'persH15':>9}{'persH30':>9}{'period':>8}{'migr15':>8}{'PI':>7}"
-        print(hdr); print("-" * len(hdr))
-        for g in sorted(rows, key=lambda g: -rows[g]["pi"]):
-            r = rows[g]
-            print(f"{g[:47]:<48}{r['n']:>5}{r['pers_nmse_h1']:>8.3f}{r['pers_nmse_h15']:>9.3f}"
-                  f"{r['pers_nmse_h30']:>9.3f}{r['periodicity']:>8.3f}"
-                  f"{r['contact_migration']:>8.3f}{r['pi']:>7.2f}")
-        print()
-        return rows
-
-    pat_rows = show("BY TEMPORAL-PATTERN CLASS (Axis B)", by_pattern)
-    cat_rows = show("BY ACTION CATEGORY (mapped via verb taxonomy)", by_category)
-    act_rows = show("BY RAW ACTIONSENSE ACTIVITY", by_activity)
-
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    import csv
-    with open(args.out, "w", newline="") as fh:
-        w = csv.writer(fh)
-        w.writerow(["grouping", "group", "n", *P.METRIC_KEYS, "predictability_index"])
-        for gname, rows in [("temporal_pattern", pat_rows), ("action_category", cat_rows),
-                            ("raw_activity", act_rows)]:
-            for g, r in sorted(rows.items(), key=lambda kv: -kv[1]["pi"]):
-                w.writerow([gname, g, r["n"], *[f"{r[k]:.5f}" for k in P.METRIC_KEYS],
-                            f"{r['pi']:.4f}"])
-    print(f"[done] wrote {args.out}")
+    report(by_activity, by_category, by_pattern)
 
 
 if __name__ == "__main__":

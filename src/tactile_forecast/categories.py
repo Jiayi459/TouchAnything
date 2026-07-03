@@ -59,6 +59,10 @@ VERB_CATEGORY = OrderedDict([
     ("arrange", "Organize/Arrange"), ("pack", "Organize/Arrange"),
     ("unpack", "Organize/Arrange"), ("assemble", "Organize/Arrange"),
     ("move", "Organize/Arrange"),
+    # tableware / composite sequences (ActionSense: set table, load dishwasher, ...)
+    ("set", "Organize/Arrange"), ("stack", "Organize/Arrange"),
+    ("load", "Organize/Arrange"), ("unload", "Organize/Arrange"),
+    ("clear", "Organize/Arrange"), ("get", "Organize/Arrange"),
     ("cut", "Cut"), ("slice", "Cut"), ("peel", "Cut"), ("chop", "Cut"),
     ("pour", "Pour"), ("scoop", "Pour"),
     ("adjust", "Organize/Arrange"),

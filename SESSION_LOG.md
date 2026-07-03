@@ -545,3 +545,23 @@ next=OpenTouch, depth=probe-first (training-free, no GPU), where=CRC.
   tighten/unscrew/tilt/tap/feel/inspect/switch/detach/attach/point/rest) + re-derive Axis B
   empirically; (b) then ActionSense + Force-Vision same recipe; (c) optional GPU forecasting to
   confirm probe on OpenTouch.
+
+### ACTIONSENSE BUILT (2026-07-02) — dataset #3
+- SCHEMA (from delpreto/ActionNet parsing_data): wearables HDF5 per subject-session,
+  `<device>/<stream>/{data,time_s,time_str}`. Tactile = `tactile-glove-left`/`-right` ->
+  `tactile_data/data` = (N,H,W) grids. Labels = `experiment-activities/activities/data` rows
+  [Activity, Start/Stop, Valid, Notes] + time_s; pair Start->Stop for intervals, drop Valid in
+  {Bad,Maybe}. 20 activity phrases (Peel/Slice/Spread/Open-close jar/Pour/Clean/Set/Stack/Load/
+  Unload/Get/Clear). Subjects S00-S05 wore tactile; S06-S09 did NOT.
+- Continuous recording -> SEGMENT by activity intervals, RESAMPLE each clip to 30 Hz (match
+  EgoTouch/OpenTouch frame-based metrics), stack L+R -> (T,2,H,W), probe. (Resample = mild
+  smoothing confound; acceptable for a within-dataset ranking; noted.)
+- BUILT: scripts/crc/download_actionsense.sh (12 wearables URLs, S00-S05, curl, ~small);
+  scripts/actionsense_predictability.py (--inspect + probe; segment/resample/stack; groups by
+  raw activity / category / temporal-pattern). Taxonomy: added tableware verbs set/stack/load/
+  unload/clear/get -> Organize/Arrange (B5). Kept spread->Fold/Cloth (EgoTouch spread_bed_sheet
+  is genuinely cloth; ActionSense butter-spread mislabels but raw-activity label is unambiguous).
+- All 20 labels map sanely (Peel/Slice->Cut B1, Pour->Pour B3, Clean->Wash/Clean B1, jar->
+  Open/Close B4, tableware->Organize B5). compile + resample verified locally.
+- NEXT (user on CRC): git pull; bash scripts/crc/download_actionsense.sh; probe --inspect (confirm
+  tactile shape/Fs); then full probe. Then cross-dataset synthesis (EgoTouch+OpenTouch+ActionSense).

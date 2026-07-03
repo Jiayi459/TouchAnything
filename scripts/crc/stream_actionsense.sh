@@ -12,6 +12,7 @@ DEST="${1:-$HOME/actionsense}"
 ACC="$DEST/acc.jsonl"
 mkdir -p "$DEST"
 rm -f "$DEST"/*.hdf5 "$ACC"          # clear any partial files + old accumulator
+rm -rf "$DEST/states"                # clear old state extraction (avoid duplicate append)
 
 URLS=(
   "https://data.csail.mit.edu/ActionNet/wearable_data/2022-06-07_experiment_S00/2022-06-07_18-10-55_actionNet-wearables_S00/2022-06-07_18-11-37_streamLog_actionNet-wearables_S00.hdf5"
@@ -36,7 +37,8 @@ for URL in "${URLS[@]}"; do
   if ! curl -fL --retry 3 -o "$f" "$URL"; then
     echo "  WARN: download failed (disk? net?), skipping"; rm -f "$f"; continue
   fi
-  python "$PROBE" --data-dir "$DEST" --jsonl "$ACC" || echo "  WARN: probe error on this file"
+  python "$PROBE" --data-dir "$DEST" --jsonl "$ACC" --extract-states "$DEST/states" \
+      || echo "  WARN: probe error on this file"
   rm -f "$f"                          # reclaim space before the next download
 done
 

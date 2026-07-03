@@ -608,3 +608,20 @@ latent embedding? physical latent variables? why?).
   per-action; rate/horizon; use Xsens pose?; compute/caching; which actions in v1). AWAIT user
   input before implementing.
 - TODO: cache segmented ActionSense smooth-action clips as small npz (avoid 30 GB re-download).
+
+### v1 DECIDED + STATE EXTRACTOR BUILT (2026-07-03)
+- Decisions (AskUserQuestion): actions = pour+slice; target = EXPLICIT physical state vector
+  (Path A, user: "decide the latent variables like CoP/velocity, not learn them" → no VAE, no
+  ConvLSTM); dynamics = GRU baseline THEN compare to structured ramp/oscillator; tactile-only.
+- Clarified for user: "spatial residual map" = a learned feature grid for a neural decoder —
+  dropped for v1 (we go fully explicit/analytic). ConvLSTM is for spatial grids, so a vector
+  state ⇒ use GRU/Kalman, NOT ConvLSTM (explained the fork; user chose the vector path).
+- BUILT: `src/tactile_forecast/physical_state.py` — analytic s(t): per-hand pressure moments
+  [F,x̄,ȳ,sxx,syy,sxy] + derive() (area,θ,ecc,vx,vy,dF) + phase() (numpy Hilbert). Coords in
+  [-1,1] (sensor-agnostic). UNIT-TESTED on synthetic: pour→F ramps/CoP fixed; slice→CoP
+  oscillates, phase advances at exactly the injected freq.
+- WIRED: `actionsense_predictability.py --extract-states DIR` saves state_N.npy (T,C,6) +
+  manifest.jsonl (append across streamed files); `stream_actionsense.sh` now passes it so ONE
+  re-stream produces the tiny state dataset (few MB) → rsync/commit, no more 30 GB re-downloads.
+- NEXT: user re-streams once to build ~/actionsense/states/ → rsync to local → I build the GRU +
+  structured forecasters (train on CPU locally). Then feedback demo.

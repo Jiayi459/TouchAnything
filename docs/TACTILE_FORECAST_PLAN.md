@@ -152,3 +152,27 @@ Weights tuned on a val split; ablate each term.
 - **Q6 Compute:** all on CRC GPU (torch env ready). Confirm data staging (stream ActionSense clips
   → cache the segmented (T,2,32,32) tensors as small npz so we don't re-download 30 GB each run).
 - **Q7 Which actions in v1?** all four smooth actions, or start with pour+slice (the two clearest)?
+
+## 10. v1 — DECIDED (2026-07-03)
+User decisions: pour + slice; **explicit physical state** (Path A, not learned latent, not
+ConvLSTM); dynamics = **GRU baseline then compare to a structured ramp/oscillator model**;
+tactile-only.
+
+**State `s(t)`** (analytic, per hand) = raw pressure moments [F, x̄, ȳ, sxx, syy, sxy]
+(`src/tactile_forecast/physical_state.py`, validated on synthetic pour/slice), with derived
+series area, orientation θ, eccentricity, CoP velocity (ẋ,ẏ), dF/dt, and phase φ (Hilbert of
+F(t)) computed at train time. Coordinates normalized to [-1,1] (sensor-size-agnostic).
+
+**Pipeline:**
+1. EXTRACT (done, code): `actionsense_predictability.py --extract-states DIR` saves per-clip
+   `state_N.npy` (T,C,6) + `manifest.jsonl`; wired into `stream_actionsense.sh` so ONE re-stream
+   yields the tiny state dataset (few MB) — rsync/commit it, never re-download 30 GB again.
+2. FORECAST (next): dataset of (past s → future s) windows; **GRU** predictor (skill vs
+   persistence on each physical variable, per horizon in seconds); then a **structured** model
+   — pour = linear ramp in F (Kalman), slice = damped oscillator in (F, CoP phase) — compare.
+   Small enough to train on CPU locally.
+3. FEEDBACK: compare a clip's s-trajectory to the expert distribution per action → largest
+   deviation = advice ("uneven pour force", "irregular slice rhythm").
+
+Metrics: per-variable forecast skill vs persistence; phase-rate error (slice); force-ramp error
+(pour). Renderer (optional, later): analytic blob from s for visualization.

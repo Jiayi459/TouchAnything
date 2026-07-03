@@ -26,6 +26,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.tactile_forecast.categories import categorize_phrase, TEMPORAL_PATTERN  # noqa: E402
 from src.tactile_forecast import predictability as P  # noqa: E402
+from src.tactile_forecast import physical_state as PS  # noqa: E402
 
 TACTILE_KEYS = ("tactile-glove-left", "tactile-glove-right")
 BAD_RATINGS = ("Bad", "Maybe")
@@ -104,10 +105,23 @@ def main():
                     help="append per-clip records here (streaming, one file at a time)")
     ap.add_argument("--report-only", action="store_true",
                     help="skip HDF5; aggregate an existing --jsonl and print/write CSV")
+    ap.add_argument("--extract-states", default=None,
+                    help="also save analytic physical-state trajectory per clip to this dir "
+                         "(state_N.npy + manifest.jsonl) for the v1 forecaster")
     ap.add_argument("--out", default=os.path.join("docs", "predictability_actionsense.csv"))
     args = ap.parse_args()
     import csv
     import json
+
+    # physical-state extraction (append across streamed files)
+    sdir = args.extract_states
+    s_manifest = None
+    s_n = 0
+    if sdir:
+        os.makedirs(sdir, exist_ok=True)
+        mpath = os.path.join(sdir, "manifest.jsonl")
+        s_n = sum(1 for _ in open(mpath)) if os.path.exists(mpath) else 0
+        s_manifest = open(mpath, "a")
 
     def report(by_activity, by_category, by_pattern):
         def show(title, groups, min_n=1):
@@ -205,8 +219,20 @@ def main():
                 by_pattern[pat].append(m)
                 if jf:
                     jf.write(json.dumps({"label": label, "cat": cat, "pat": pat, "m": m}) + "\n")
+                if s_manifest is not None:
+                    st = PS.clip_states(clip).astype("float32")  # (T, C, 6)
+                    np.save(os.path.join(sdir, f"state_{s_n}.npy"), st)
+                    s_manifest.write(json.dumps({
+                        "idx": s_n, "label": label, "cat": cat,
+                        "fps": args.target_fps, "T": int(st.shape[0]),
+                        "features": list(PS.FEATURES)}) + "\n")
+                    s_manifest.flush()
+                    s_n += 1
                 n_ok += 1
         print(f"  {os.path.basename(fp)}: cumulative usable clips={n_ok}")
+    if s_manifest is not None:
+        s_manifest.close()
+        print(f"extracted {s_n} state trajectories -> {sdir}")
     if jf:
         jf.close()
         print(f"\nappended {n_ok} clips (of {n_iv} intervals) -> {args.jsonl}")

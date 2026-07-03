@@ -29,7 +29,10 @@ for URL in "${URLS[@]}"; do
   n=$((n + 1))
   out="$(basename "$URL")"
   echo "[$n/${#URLS[@]}] $out"
-  if [ -s "$out" ]; then echo "  exists, skip"; continue; fi
-  curl -fL --retry 3 -o "$out" "$URL" || echo "  WARN: failed $URL"
+  remote=$(curl -sIL "$URL" | grep -i '^content-length:' | tail -1 | tr -dc '0-9')
+  local=$(stat -c%s "$out" 2>/dev/null || echo 0)
+  if [ -n "$remote" ] && [ "$local" = "$remote" ]; then echo "  complete, skip"; continue; fi
+  # resume partial (-C -) or fetch; retry a few times
+  curl -fL --retry 3 -C - -o "$out" "$URL" || echo "  WARN: failed $URL (disk full? quota?)"
 done
-echo "done -> $DEST  ($(ls *.hdf5 2>/dev/null | wc -l) files)"
+echo "done -> $DEST  ($(ls *.hdf5 2>/dev/null | wc -l) files, $(du -sh . 2>/dev/null | cut -f1))"

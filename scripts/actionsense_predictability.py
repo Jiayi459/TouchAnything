@@ -124,7 +124,12 @@ def main():
     by_pattern = P.new_group_dict()
     n_ok = n_iv = 0
     for fp in files:
-        with h5py.File(fp, "r") as h5:
+        try:
+            h5 = h5py.File(fp, "r")
+        except OSError as e:
+            print(f"  {os.path.basename(fp)}: CORRUPT/truncated ({e.args[0][:40]}...), skip")
+            continue
+        with h5:
             gloves = [load_tactile(h5, k) for k in TACTILE_KEYS]
             if all(g is None for g in gloves):
                 print(f"  {os.path.basename(fp)}: no tactile stream, skip")

@@ -625,3 +625,18 @@ latent embedding? physical latent variables? why?).
   re-stream produces the tiny state dataset (few MB) → rsync/commit, no more 30 GB re-downloads.
 - NEXT: user re-streams once to build ~/actionsense/states/ → rsync to local → I build the GRU +
   structured forecasters (train on CPU locally). Then feedback demo.
+
+### BASELINE-OFFSET BUG FOUND + FIXED (2026-07-03)
+- First state dataset (299 clips, transferred to data/actionsense_states/) was DEGENERATE:
+  real F ≈ 585,000 with ±0.5% wobble, CoP_x std ≈ 0.001 (no motion). CAUSE: ActionSense
+  conductive-thread gloves have a large per-taxel DC baseline (~571/taxel, untared; that's the
+  `tactile-calibration-scale` device's job) → total force dominated by offset, CoP pinned to
+  center. (Also retro-explains ActionSense's tiny persH in the probe — static baseline inflates
+  Var.) FIX: `physical_state.baseline_correct` subtracts per-taxel 5th-percentile-over-time before
+  moments; verified on synthetic (recovers CoP std 0.354 = injected amplitude). clip_states
+  baseline-corrects by default.
+- Must RE-EXTRACT (saved moments can't be un-baselined). To make it the LAST CRC round, added
+  `--save-clips-for "Pour,Slice"` → caches raw resampled (T,C,H,W) clips (float16) so all future
+  preprocessing/forecasting is LOCAL. stream_actionsense.sh updated.
+- ACTION: user re-streams once → transfer states/ (now ~200 MB incl. clip_N.npy) to
+  data/actionsense_states/ → then build forecaster fully locally.

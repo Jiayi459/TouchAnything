@@ -587,3 +587,24 @@ next=OpenTouch, depth=probe-first (training-free, no GPU), where=CRC.
   scorable "correct" force profile). Written up in docs/ACTION_CATEGORIES.md §3c + §4.
 - REMAINING: Force-Vision (4th dataset, press/hold/squeeze) optional; OpenTouch improved-taxonomy
   category view optional (needs 14 GB re-download); GPU per-category forecasting to confirm probe.
+
+### NEW DIRECTION — GENERATIVE FORECASTER FOR SMOOTH ACTIONS (2026-07-03)
+User directives: (1) DOCUMENT the study thoroughly → wrote docs/STUDY_SUMMARY.md. (2) DROP
+EgoTouch going forward — usable hardware is the glove behind the 3 linked datasets (ActionSense/
+OpenTouch/Force-Vision); EgoTouch = historical reference only. (3) TRAIN a GPU forecaster
+(ConvLSTM family) on the predictable smooth-force actions (slice, wipe/clean, pour, peel) in
+ActionSense. (4) BRAINSTORM the training framework in detail (generative framework? network? loss?
+latent embedding? physical latent variables? why?).
+- DESIGN DOC: docs/TACTILE_FORECAST_PLAN.md. Proposal = a PHYSICS-STRUCTURED LATENT WORLD MODEL:
+  β-VAE encoder → low-dim latent with NAMED physical channels [total force F, center-of-pressure
+  (x̄,ȳ), contact area A, patch orientation/eccentricity, motion phase (sinφ,cosφ), force-rate
+  dF/dt] + small residual → ConvLSTM/GRU latent predictor (in LATENT space, reusing our ConvLSTM)
+  → decoder. Phase 2: stochastic RSSM / latent diffusion. Rationale: small data (~300 clips) +
+  interpretable latent needed for feedback. Loss = masked log-space recon + total-force + contact
+  support(BCE/IoU) + physical-latent supervision + temporal smoothness(jerk) + spectral/phase
+  (periodic subset) + β·KL. Small-data plan: shared model conditioned on action, self-supervised
+  pretrain on the full continuous stream, heavy aug (flip/rotate/speed-warp), cross-glove transfer.
+- OPEN QUESTIONS Q1-Q7 in the plan doc (latent form; deterministic-first vs RSSM; shared vs
+  per-action; rate/horizon; use Xsens pose?; compute/caching; which actions in v1). AWAIT user
+  input before implementing.
+- TODO: cache segmented ActionSense smooth-action clips as small npz (avoid 30 GB re-download).

@@ -116,7 +116,53 @@ it holds predictable food actions); (iii) `Pour` (pour/scoop, very predictable) 
 B3-ramp and pooled with unpredictable pull/push/slide. LESSON: Axis B must be assigned *per
 action from the data*, not a-priori; the durable finding is the trait above, not the B-label.
 
-## 4. Findings
+## 3c. ActionSense result (299 clips, S00-S05) — clean confirmation
+
+ActionSense = 32x32 two-hand conductive-thread gloves, native ~6 Hz (resampled to 30 Hz →
+`persH1` and `contact_migration` are degenerate here; `persH15/H30` + periodicity carry the
+signal). Its labeled kitchen activities are the two poles of the trait, and the ranking is
+unambiguous:
+
+**By raw activity, easiest → hardest (PI):**
+`Slice cucumber +2.7 · Pour water +2.0 · Clear cutting board +1.7 · Clean plate w/ towel +1.7 ·
+Peel cucumber +1.5 · Slice bread +1.4 · Peel/Slice potato +1.0` … then tableware composites …
+`Clean pan w/ towel −1.6 · Open/close jar −2.3/−2.9 · Get/replace items −4.1`.
+
+**By category:** Pour +2.6 › Cut(slice/peel) +1.8 › Wash/Clean +0.1 › Fold/Cloth(spread) −0.5 ›
+Organize(tableware) −1.4 › Open/Close(jar) −2.6.
+**By temporal pattern:** B3 ramp(pour) +2.5 › B1 periodic +0.8 › B5 composite −1.2 › B4 transition −2.2.
+
+Here the a-priori Axis B *works* (ramp/periodic on top, transition/composite at the bottom) —
+because ActionSense activities match their canonical mechanics (slicing food really is rhythmic,
+pouring really is a smooth ramp), unlike OpenTouch's "turning a stiff latch".
+
+## 4. Findings (three datasets, three sensors)
+
+The headline is a **trait, confirmed across all three sensors** (EgoTouch 21x21/2-hand/30 Hz,
+OpenTouch 16x16/1-hand/30 Hz, ActionSense 32x32/2-hand/6 Hz):
+
+> **Predictable tactile = smooth, continuous, slowly-varying contact force.**
+> **Unpredictable = abrupt onset / make-or-break engagement.**
+
+| | consistently MOST predictable | consistently LEAST predictable |
+|---|---|---|
+| EgoTouch | cut(slice), wipe, spray | press/click, plug/insert, pinch |
+| OpenTouch | pour, stir, scoop, serve, wipe | turn(latch), pull, move, press |
+| ActionSense | pour, slice, peel, clean/wipe, clear | open/close jar, tableware composites |
+
+`persH15` (how slowly the signal decorrelates) is the sensor-agnostic predictor; periodicity
+adds signal where actions are rhythmic. **Refinement from ActionSense:** a *smooth ramp* (pour,
+PI #1) beats even a *rhythmic cycle* (slice) — a cycle still has force-reversal turning points a
+forecaster must anticipate, whereas a monotonic pour does not. So the ordering within "smooth"
+is: monotonic ramp > rhythmic cycle > sustained hold > discrete transition.
+
+**Category vs. trait:** the *category* ranking is dataset-dependent (a verb behaves differently
+per context — rhythmic turn vs. stiff-latch turn), but the *trait* is stable. That is the durable
+answer to "what makes an action suitable for prediction," and the basis for user feedback:
+smooth-force actions (slice, wipe, pour) have a well-defined "correct" force profile to score a
+user against; abrupt/discrete actions do not.
+
+## 4b. Original per-category findings (EgoTouch, kept for reference)
 
 1. **Repeatable/periodic surface actions are the most predictable.** `Cut` (slicing) dominates on
    *all three* sub-metrics — lowest error, highest periodicity, most stable footprint — followed by

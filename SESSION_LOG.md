@@ -565,3 +565,25 @@ next=OpenTouch, depth=probe-first (training-free, no GPU), where=CRC.
   Open/Close B4, tableware->Organize B5). compile + resample verified locally.
 - NEXT (user on CRC): git pull; bash scripts/crc/download_actionsense.sh; probe --inspect (confirm
   tactile shape/Fs); then full probe. Then cross-dataset synthesis (EgoTouch+OpenTouch+ActionSense).
+
+### ACTIONSENSE RESULT + THREE-DATASET SYNTHESIS (2026-07-03)
+- DISK saga: ActionSense wearables HDF5 = 2-4 GB each (embed eye-video) → ~35 GB, exceeds 100 GB
+  home (66 used) → repeated curl/truncation/ENOSPC. SOLVED via streaming driver
+  scripts/crc/stream_actionsense.sh (download 1 file → probe → delete → next; --jsonl accumulate
+  + --report-only aggregate). OpenTouch raw data got deleted along the way (kept its earlier CSV).
+- ACTIONSENSE PROBE (299 clips, S00-S05, 32x32 2-hand, 6 Hz→30 Hz resample; persH1 & migration
+  degenerate from upsampling — persH15/H30 + periodicity carry signal):
+  - raw activity: Slice cucumber +2.7 / Pour +2.0 / Clear board +1.7 / Clean-plate-towel +1.7 /
+    Peel +1.5 / Slice bread +1.4 ... bottom: Open/close jar -2.3/-2.9, Get/replace items -4.1.
+  - category: Pour +2.6 > Cut +1.8 > Wash/Clean +0.1 > Fold/Cloth(spread) -0.5 > Organize -1.4 >
+    Open/Close -2.6. temporal: B3 ramp +2.5 > B1 periodic +0.8 > B5 composite -1.2 > B4 trans -2.2.
+  - Here a-priori Axis B WORKS (actions match canonical mechanics), unlike OpenTouch.
+- SYNTHESIS (3 sensors) — TRAIT CONFIRMED: predictable = smooth/continuous/slowly-varying force
+  (pour/slice/wipe/peel/stir/scoop); unpredictable = abrupt onset/make-break (open-close jar,
+  press/click, plug, stiff turn). persH15 = sensor-agnostic predictor. REFINEMENT (from
+  ActionSense): monotonic ramp (pour #1) > rhythmic cycle (slice) > sustained hold > transition —
+  a cycle has force-reversal turning points; a pour doesn't. Category ranking is dataset-dependent;
+  the TRAIT is stable → the durable answer + basis for user feedback (smooth actions have a
+  scorable "correct" force profile). Written up in docs/ACTION_CATEGORIES.md §3c + §4.
+- REMAINING: Force-Vision (4th dataset, press/hold/squeeze) optional; OpenTouch improved-taxonomy
+  category view optional (needs 14 GB re-download); GPU per-category forecasting to confirm probe.

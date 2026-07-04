@@ -662,3 +662,22 @@ latent embedding? physical latent variables? why?).
   persistence. DECISION PENDING with user: (a) pivot to normative feedback model; (b) push
   forecasting (pool pour+slice+peel+clean for 3-4x data, longer horizons, phase-explicit
   oscillator, regularization); (c) accept finding + write up.
+
+### v2 SLOW/FAST + PROBABILISTIC — BREAKTHROUGH (2026-07-03)
+User chose: separate slow+fast & model the FAST action component; probabilistic (mean+band).
+- DIAGNOSIS confirmed: fast (high-pass) component of F/CoP decorrelates within ~2 s (autocorr
+  ~0..-0.3) → persistence-of-fast is a WEAK baseline (headroom exists), and fast is 0.33-0.55 of
+  slow amplitude (real signal). The slow grip/postural part is what made raw-state persistence
+  unbeatable.
+- BUILT `scripts/train_action_dynamics.py`: low/high-pass split (scipy butter, cut 0.4 Hz) of
+  active-hand F,x,y → target = fast [F,x,y]; input += slow F + CoP velocity; action embedding;
+  probabilistic GRU (mean+logvar), Gaussian NLL; 5-fold CV by trajectory; downsample 30→10 Hz,
+  predict 0.5 s from 1 s.
+- RESULT (5-fold): pooled(Pour,Slice,Peel,Clean) MEAN skill **+0.725**, band coverage@2sd **0.93**
+  (ideal ~0.95 → well-calibrated!). Pour+Slice only +0.736. Per-target: F_fast +0.63-0.68,
+  x_fast/y_fast +0.76-0.78. STABLE across folds (std 0.01-0.05) — v1's high variance gone.
+- TAKEAWAYS: (1) the redesign (slow/fast + probabilistic), NOT extra data, drove the win (pooling
+  ≈ pour+slice alone). (2) We now have a calibrated model of the expected fast action dynamics +
+  uncertainty band → FEEDBACK-READY: score a user's fast F/CoP against the expert mean±band.
+- NEXT OPTIONS: build the feedback/anomaly demo (deviation vs band); add phase/rhythm metric;
+  per-hand (not just active); write up. Committed with the v2 code.

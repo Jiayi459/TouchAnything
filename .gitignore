@@ -27,3 +27,6 @@ __pycache__/
 # OS / editor
 .DS_Store
 Thumbs.db
+
+# large cached raw tactile clips (states are kept; clips regenerable on CRC)
+data/actionsense_states/clip_*.npy

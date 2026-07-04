@@ -640,3 +640,25 @@ latent embedding? physical latent variables? why?).
   preprocessing/forecasting is LOCAL. stream_actionsense.sh updated.
 - ACTION: user re-streams once → transfer states/ (now ~200 MB incl. clip_N.npy) to
   data/actionsense_states/ → then build forecaster fully locally.
+- DONE: corrected states transferred. Verified REAL signals: pour F ramps 950→9800 (was flat
+  585k); slice CoP moves. 299 states + 70 clips local. clip_*.npy gitignored (200M); states kept.
+
+### v1 FORECASTER BUILT + RESULT (2026-07-03) — runs fully local on CPU torch
+- BUILT: `src/tactile_forecast/state_forecast.py` (data/windows/normalize + numpy baselines
+  persistence/velocity/linfit + GRU seq2seq residual rollout) and
+  `scripts/train_state_forecaster.py` (per-action, skill-vs-persistence per physical variable,
+  all-12 vs core F+CoP summary, --downsample to native ~6 Hz).
+- RESULT (pour, slice; downsample5→6Hz, t_in6/t_out12=1s→2s): GRU ≈ persistence, slightly BELOW
+  on aggregate (all=-0.09..-1.1) and HIGH VARIANCE across seeds (pour 0_F once +0.40, once -0.13).
+  velocity/linfit MUCH worse (-3..-19). Core F+CoP no robustly positive.
+- INTERPRETATION (honest): this CONFIRMS the study's central principle at the physical-state level
+  — smooth, slowly-varying signals are "predictable" precisely because PERSISTENCE predicts them
+  well ⇒ little skill-over-persistence headroom. The smoothness that makes them predictable makes
+  them hard to BEAT persistence on. (Same reason EgoTouch holds ≈ 0 skill.) Not a bug; a property.
+- REFRAME (for the feedback GOAL): skill-vs-persistence is the WRONG target for smooth actions.
+  Pivot to a NORMATIVE model: build the expected physical-state trajectory (mean±band, phase/DTW
+  aligned across clips) per action; feedback = deviation of a user's F/CoP/dF-dt from the expert
+  band ("force jerky", "rhythm irregular"). The extracted state is used DESCRIPTIVELY, not to beat
+  persistence. DECISION PENDING with user: (a) pivot to normative feedback model; (b) push
+  forecasting (pool pour+slice+peel+clean for 3-4x data, longer horizons, phase-explicit
+  oscillator, regularization); (c) accept finding + write up.

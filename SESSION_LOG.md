@@ -833,3 +833,18 @@ variables (force, center of pressure), then **separating the trivially-persisten
 fast action component and modeling that component probabilistically**, yields a calibrated
 forecaster (skill +0.73 over persistence, 93% band coverage) whose interpretable, bounded outputs
 are exactly what is needed to give a user actionable feedback.
+
+### PER-ACTION v2 COMPARISON → ACTION CHOICE (2026-07-06)
+Ran v2 (slow/fast probabilistic, 5-fold) per single action. Fast-component skill / band coverage:
+- Peel (n=30): +0.754 / 0.92 ; Slice (n=75): +0.738 / 0.92 ; Clean/wipe (n=60): +0.618 / 0.89 ;
+  Pour (n=25): +0.610 / 0.81 (miscalibrated, small n).
+RANKING: rhythmic repeated-stroke actions (peel, slice, wipe) > ramp (pour).
+INSIGHT: this REVERSES the raw-signal trait ordering (which put pour/ramp top). Reason: for the
+FAST component, rhythmic strokes have a clean oscillation (structured, predictable, calibratable),
+whereas pour's fast part is unstructured tremor once the ramp is removed. Rhythmic actions also
+have a well-defined "correct rhythm" → natural feedback template.
+DECISION: target the REPETITIVE-STROKE family (slice + peel, then wipe) for the forecaster +
+feedback demo; pour is the weakest fit despite being "most predictable" in the raw sense.
+Horizon sweep (pooled): skill 0.74/0.68/0.62/0.58 at 0.5/1.0/1.5/2.0 s (gentle decay; 1 s a good
+operating point). 0.73 "skill" is dimensionless (1-MSE/MSE_persistence); CoP in [-1,1] grid units
+(not mm), force uncalibrated.

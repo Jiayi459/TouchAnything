@@ -681,3 +681,155 @@ User chose: separate slow+fast & model the FAST action component; probabilistic 
   uncertainty band → FEEDBACK-READY: score a user's fast F/CoP against the expert mean±band.
 - NEXT OPTIONS: build the feedback/anomaly demo (deviation vs band); add phase/rhythm metric;
   per-hand (not just active); write up. Committed with the v2 code.
+
+---
+
+## COMPREHENSIVE SUMMARY (2026-07-06) — for explaining the work to other researchers
+
+### A. Research question
+Which *kind* of hand action is easiest to predict from its own past tactile signal, and — more
+usefully — **what trait makes an action series predictable**, so a predictor can give a user
+feedback to improve performance. Priors under test: standardized-procedure and repeatable/periodic
+actions are easier.
+
+### B. Datasets and what we did with each
+Four tactile datasets; three processed with data, one from paper only.
+1. **EgoTouch** (21×21 FPC grid, 2 hands, 30 Hz) — probed (23 verb categories) AND used to build the
+   pixel forecaster (SimVP/ConvLSTM/ConvGRU). *Later deprecated* per user (not the target glove).
+2. **OpenTouch** (arXiv 2512.16842; 16×16 FPC, 1 hand, 30 Hz) — probed 2,496 clips. Per-clip
+   action + grip labels (GRASP taxonomy) in HDF5 + CSV.
+3. **ActionSense** (NeurIPS'22; 32×32 conductive-thread, 2 hands, ~6 Hz) — probed 299 clips (S00-05)
+   AND used for the physical-state forecaster (v1/v2). 20 kitchen activities as Start/Stop intervals.
+4. **Force-Vision** (ICLR'24; STAG glove) — categorized from the paper only (press/hold/squeeze);
+   NOT downloaded/probed.
+
+### C. Processing pipeline per dataset
+- **EgoTouch**: HF download (metadata + `pressure_grids.npz`, no video). Layout scene/task/traj.
+  Tasks named `verb_object` → categorized by first-verb token. Pressure = (T,2,21,21), ~50% NaN
+  structural sensor mask (zero-filled), log1p amplitude transform.
+- **OpenTouch**: 26 HDF5 shards (~14 GB) + `final_annotations` CSVs via gdown. Each HDF5 =
+  `data/<clip>/right_pressure` (T,16,16) + labels joined from per-scene CSV on `clip_id`
+  ("<scene>::demo_N"). Free-text gerund actions normalized (pulling→pull) then verb-mapped.
+- **ActionSense**: wearables HDF5 (2-4 GB each, embed EMG/Xsens/eye-video) → too big for the
+  home quota, so a STREAMING driver downloads one file → processes → deletes → next.
+  Tactile = `tactile-glove-{left,right}/tactile_data/data` (T,32,32). Activities from
+  `experiment-activities/activities` rows [Activity,Start/Stop,Valid,Notes]; pair Start→Stop
+  (drop Bad/Maybe) → intervals; slice tactile per interval; resample to 30 Hz; stack both gloves
+  → (T,2,32,32). **Baseline correction** (per-taxel 5th-percentile subtraction) applied before any
+  physical-state computation (see Problem P4).
+
+### D. Scripts and their functions
+- `scripts/categorize_actions.py` — assign each EgoTouch task to an action category (verb taxonomy);
+  print per-category task/trajectory counts. (Classification only.)
+- `scripts/predictability_by_category.py` — EgoTouch per-category **training-free probe**: load
+  pressure, compute predictability metrics per trajectory, group by verb category AND
+  temporal-pattern axis, rank by composite index; write CSV.
+- `scripts/opentouch_predictability.py` — OpenTouch probe (HDF5 clips + CSV labels); `--inspect`
+  schema mode + probe; group by temporal-pattern / mapped-category / raw-action / grip; CSV.
+- `scripts/actionsense_predictability.py` — ActionSense probe: segment continuous tactile by
+  activity intervals, resample, stack gloves, metrics; `--jsonl`/`--report-only` (streaming
+  accumulate/aggregate); `--extract-states` (save physical-state trajectory per clip);
+  `--save-clips-for` (cache raw clips).
+- `scripts/crc/stream_actionsense.sh` — the download→probe→delete streaming driver (bounds disk to
+  one file); accumulates per-clip records; final report + state extraction.
+- `scripts/aggregate_results.py` — aggregate GPU pixel-forecaster runs by (model,scope,category);
+  ranked per-category test skill.
+- `src/tactile_forecast/train.py` — pixel forecaster trainer (SimVP/ConvLSTM/ConvGRU), LTO/LOTO CV,
+  `--category` filter, skill-vs-persistence. (EgoTouch.)
+- `scripts/train_state_forecaster.py` — **v1** physical-state forecaster (GRU vs baselines).
+- `scripts/train_action_dynamics.py` — **v2** slow/fast probabilistic action-dynamics model.
+Shared modules: `categories.py` (taxonomy), `predictability.py` (metrics), `physical_state.py`
+(analytic state), `state_forecast.py` (v1 data/model).
+
+### E. Algorithms and WHY we chose them
+1. **Verb taxonomy categorization** (rule-based, first known verb token; gerund-normalized).
+   *Why:* unify heterogeneous labels across datasets into ONE comparable category space + a
+   temporal-pattern axis (B1 periodic … B5 composite), enabling cross-dataset comparison.
+2. **Training-free predictability probe** — per clip: `persistence_nMSE@h` = MSE(y[t+h],y[t])/Var
+   (decorrelation rate), `periodicity` = max total-force autocorr at lag 0.33-1.5 s,
+   `contact_migration` = 1−IoU of active-taxel mask, composite `PI` = z(−persH15)+z(period)+z(−migr).
+   *Why:* measure "how forecastable" WITHOUT training/GPU — fast, sensor-agnostic, and directly
+   tests the periodicity/standardization priors. PI fuses the three physical axes.
+3. **Pixel forecaster (SimVP/ConvLSTM/ConvGRU)**, skill vs persistence, LTO/LOTO.
+   *Why:* standard tactile spatiotemporal forecasting; establishes REAL trained-model skill
+   (not just the proxy) on EgoTouch, and a per-category comparison.
+4. **Analytic physical-state extraction** — per hand per frame: 0th/1st/2nd pressure moments
+   [F, CoP(x,y), spread(sxx,syy,sxy)]; derived area/orientation/velocity/dF-dt; Hilbert phase;
+   per-taxel baseline subtraction; coords normalized to [-1,1].
+   *Why:* a low-dimensional, fully interpretable state — data-efficient for small data AND directly
+   usable for feedback (named physical variables a coach can talk about). User chose explicit
+   variables over a learned latent.
+5. **v1 GRU seq2seq on the raw state.** *Why:* a vector state calls for a vector sequence model
+   (ConvLSTM is for spatial grids). RESULT: failed (≈ persistence).
+6. **v2 slow/fast + probabilistic GRU** — low/high-pass split F/CoP; model the FAST action
+   component; probabilistic head (mean+variance), Gaussian NLL; action embedding; k-fold CV.
+   *Why:* the slow grip component is trivially persistent (killed v1); the fast component carries
+   the stroke/pour dynamics and decorrelates within ~2 s (real headroom); probabilistic output
+   yields the calibrated "expert band" feedback needs.
+
+### F. Results
+- **EgoTouch probe (1,929 clips):** easiest Cut(slice)+6.0, Take, Inflate, Spray, Wash/Clean;
+  hardest Press/Click −6.7, Plug/Insert, Pinch, Grasp/Hold/Lift. Holds NOT trivially predictable.
+- **EgoTouch pixel forecaster:** LTO (seen-object) +0.192 skill; LOTO (unseen) ≈ 0; broad
+  pretraining lifts LOTO to +0.097.
+- **OpenTouch probe (2,496):** easiest pour/serve/eat/stir/scoop/wipe; hardest turn(latch)/pull/
+  move. `contact_migration≈0` (single-hand grasp never breaks contact) → degenerate there.
+  A-priori temporal-pattern axis INVERTS vs EgoTouch (Problem P2).
+- **ActionSense probe (299):** Pour +2.6 > Cut(slice/peel) +1.8 > Wash/Clean > Fold(spread) >
+  Organize(tableware) > Open/Close(jar) −2.6. Cleanest confirmation; pattern axis works here.
+- **HEADLINE (3 sensors):** predictable = **smooth, continuous, slowly-varying contact force**
+  (pour/slice/wipe/peel/stir/scoop); unpredictable = **abrupt onset / make-or-break** (jar,
+  press, plug, stiff turn). `persH15` is the sensor-agnostic predictor. Refinement: monotonic
+  ramp (pour) > rhythmic cycle (slice) > hold > transition. Category ranking is dataset-dependent;
+  the TRAIT is stable.
+- **v1 forecaster (raw state):** GRU ≈ persistence (mean skill ~−0.1), HIGH variance. Confirms the
+  "smooth ⇒ low skill-over-persistence headroom" principle at the state level.
+- **v2 forecaster (slow/fast + probabilistic):** 5-fold CV mean skill **+0.725** (pooled) / **+0.736**
+  (pour+slice) vs persistence-of-fast; per-target F +0.63-0.68, CoP +0.76-0.78; band coverage@2sd
+  **0.93** (well-calibrated); STABLE across folds. Pooling ≈ pour+slice alone → the REPRESENTATION
+  (slow/fast + probabilistic), not extra data, drove the win. → feedback-ready.
+
+### G. Problems encountered (scientific/methodological; version-control issues excluded)
+- **P1 Cross-sensor incomparability.** Four different glove geometries/rates → raw skill numbers
+  are NOT comparable across datasets. *Fix:* rank WITHIN each dataset; compare across datasets only
+  by the temporal-pattern axis and the qualitative trait.
+- **P2 The a-priori temporal-pattern axis breaks across datasets.** The same verb behaves
+  differently by context ("turning a stiff latch" in OpenTouch is an abrupt transition, not the
+  rhythmic turn EgoTouch assumed), and many verbs were unmapped → dumped in "Other". *Fix:* expand
+  the taxonomy; treat the pattern label as a-priori and let the measured periodicity decide;
+  emphasize the trait over the category label.
+- **P3 The "predictable" actions have little skill-over-persistence headroom.** The very smoothness
+  that makes pour/slice predictable in absolute terms makes them near-perfectly predicted by
+  persistence → a trained forecaster on the raw state can't beat it (v1 failed). This is the
+  deepest finding, not a bug. *Fix/insight:* separate the persistent slow (grip) component and model
+  the fast (action) component, which does have headroom (v2).
+- **P4 Sensor DC baseline offset (ActionSense).** The conductive-thread glove is not tared: every
+  taxel has a large resting value (~571/taxel) → total force ≈ constant (585,000 ± 0.5%) and CoP
+  pinned to center — the first physical-state extraction was DEGENERATE (no motion visible). *Fix:*
+  per-taxel 5th-percentile baseline subtraction before computing moments (validated on synthetic:
+  recovers the true CoP oscillation). Also retro-explains the inflated (tiny) persH in the probe.
+- **P5 Resampling artifact.** ActionSense native ~6 Hz upsampled to 30 Hz → adjacent frames are
+  near-duplicates → persistence artificially strong at short horizons. *Fix:* forecast at native
+  rate (downsample back to ~6-10 Hz).
+- **P6 Noisy higher-order features dilute the metric.** The 2nd-moment shape terms (orientation/
+  covariance) are unpredictable jitter and irrelevant to feedback, but equal-weighting dragged the
+  mean skill negative. *Fix:* focus targets/metrics on the core feedback variables (F, CoP).
+- **P7 Small data / high variance.** ~15-30 clips per activity, ~18 train trajectories per action →
+  a single train/val split gave wildly unstable skill (+0.40 vs −0.13). *Fix:* k-fold CV
+  (report mean±std); action pooling; probabilistic model; strong regularization.
+- **P8 Disk/logistics (ActionSense).** Wearables files are 2-4 GB each (~35 GB total) vs a limited
+  home quota → download failures/truncation. *Fix:* the streaming download→probe→delete driver +
+  caching only the tiny states (and a small set of raw clips) locally so no dataset is re-downloaded.
+- (Excluded per user: GitHub auth/divergent-branch/CRC-code-sync issues — real time sinks but
+  not scientific.)
+
+### H. One-paragraph narrative (for a researcher)
+We built a sensor-agnostic, training-free probe to rank how forecastable each action's tactile
+signal is, applied it across three tactile gloves, and found a stable, sensor-independent trait:
+smooth continuous-force actions (pour, slice, wipe) are predictable, abrupt make/break actions
+(jar, press) are not — but the very smoothness that makes them "predictable" means a naive
+forecaster only matches persistence. Reducing each pressure field to interpretable physical
+variables (force, center of pressure), then **separating the trivially-persistent grip from the
+fast action component and modeling that component probabilistically**, yields a calibrated
+forecaster (skill +0.73 over persistence, 93% band coverage) whose interpretable, bounded outputs
+are exactly what is needed to give a user actionable feedback.

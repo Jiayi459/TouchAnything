@@ -42,10 +42,16 @@ def main():
     data = load_pooled(args.root, subs, 30.0, args.cut, args.downsample)
     viz_i = next(i for i, d in enumerate(data) if d[2] == subs.index(
         next(s for s in subs if s.lower() in args.viz_action.lower() or args.viz_action.lower() in s.lower())))
-    train = [d for i, d in enumerate(data) if i != viz_i]
+    # proper train/TEST split — hold out ~25% of clips (the viz clip is in the test set)
+    rng = np.random.default_rng(1)
+    order = rng.permutation(len(data))
+    n_test = max(2, int(round(0.25 * len(data))))
+    test_ids = set(order[:n_test].tolist()) | {viz_i}
+    train = [d for i, d in enumerate(data) if i not in test_ids]
+    test = [d for i, d in enumerate(data) if i in test_ids]
     vfeat, vtarg, vaid = data[viz_i]
     TGT = ["F_fast", "x_fast", "y_fast"][args.target]
-    print(f"train on {len(train)} clips, visualize clip #{viz_i} (action id {vaid}), target {TGT}")
+    print(f"train {len(train)} / test {len(test)} clips; visualize TEST clip #{viz_i}, target {TGT}")
 
     class ProbGRU(nn.Module):
         def __init__(self, din, n_act, hid):
@@ -89,8 +95,19 @@ def main():
             (0.5 * (lv + (yt[b] - mu) ** 2 * torch.exp(-lv)).mean()).backward()
             opt.step()
 
-    # rolling 1-step-ahead forecast across the held-out clip
+    # --- TEST-set skill (all held-out clips) vs persistence-of-fast ---
     model.eval()
+    Xte, Ate, Yin_te, Yte, _ = windows(test, args.t_in, 5, 2)
+    with torch.no_grad():
+        mu_te, _ = model(torch.tensor(((Xte - mu_x) / sd_x).astype(np.float32)),
+                         torch.tensor(Ate),
+                         torch.tensor(((Yin_te[:, -1] - mu_y) / sd_y).astype(np.float32)), 5)
+        mu_te = mu_te.numpy() * sd_y + mu_y
+    persist_te = np.repeat(Yin_te[:, -1:], 5, 1)
+    sk_te = 1 - ((mu_te - Yte) ** 2).mean((0, 1)) / (((persist_te - Yte) ** 2).mean((0, 1)) + 1e-12)
+    print(f"TEST-set skill vs persistence: {sk_te.mean():+.3f}  (per target {np.round(sk_te,2)})")
+
+    # rolling 1-step-ahead forecast across the visualized TEST clip
     fn = (vfeat - mu_x) / sd_x
     tn = (vtarg - mu_y) / sd_y
     ts, mus, sds, trues = [], [], [], []
@@ -112,7 +129,8 @@ def main():
     ax1.fill_between(ts, mus - 2 * sds, mus + 2 * sds, color="C0", alpha=0.18, label="+/-2 sigma")
     ax1.fill_between(ts, mus - sds, mus + sds, color="C0", alpha=0.30, label="+/-1 sigma")
     ax1.set_ylabel(f"{TGT}"); ax1.legend(loc="upper right", fontsize=8)
-    ax1.set_title(f"v2 probabilistic 1-step forecast — {args.viz_action} (held-out clip), {TGT}")
+    ax1.set_title(f"v2 probabilistic forecast on TEST clip — {args.viz_action}, {TGT}  "
+                  f"(test-set mean skill {sk_te.mean():+.2f} vs persistence)")
 
     # density map: Gaussian pdf per time column
     lo = float(min((mus - 3 * sds).min(), trues.min()))

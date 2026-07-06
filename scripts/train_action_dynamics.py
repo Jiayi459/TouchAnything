@@ -49,7 +49,10 @@ def load_pooled(root, action_subs, fps_default, cut, ds):
     rows = [json.loads(l) for l in open(os.path.join(root, "manifest.jsonl"))]
     data = []
     for r in rows:
-        aid = next((i for i, s in enumerate(action_subs) if s.lower() in r["label"].lower()), None)
+        # match on the label's STARTING verb so "Slice" doesn't also grab
+        # "Spread ... on a bread slice" (substring-in-label was over-matching)
+        aid = next((i for i, s in enumerate(action_subs)
+                    if r["label"].lower().startswith(s.lower())), None)
         if aid is None:
             continue
         st = np.load(os.path.join(root, f"state_{r['idx']}.npy"))

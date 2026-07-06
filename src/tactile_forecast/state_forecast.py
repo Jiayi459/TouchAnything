@@ -31,7 +31,7 @@ def load_trajectories(root, label_substr):
     """Return list of (T, C*6) float32 trajectories whose label contains label_substr."""
     trajs = []
     for r in load_manifest(root):
-        if label_substr.lower() in r["label"].lower():
+        if r["label"].lower().startswith(label_substr.lower()):
             st = np.load(os.path.join(root, f"state_{r['idx']}.npy"))  # (T, C, 6)
             trajs.append(st.reshape(st.shape[0], -1).astype(np.float32))
     return trajs

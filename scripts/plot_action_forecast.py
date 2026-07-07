@@ -28,6 +28,7 @@ def main():
     ap.add_argument("--downsample", type=int, default=3)
     ap.add_argument("--cut", type=float, default=0.4)
     ap.add_argument("--t-in", type=int, default=10)
+    ap.add_argument("--t-out", type=int, default=5, help="forecast horizon (5 = 0.5s at 10 Hz)")
     ap.add_argument("--hidden", type=int, default=48)
     ap.add_argument("--epochs", type=int, default=80)
     ap.add_argument("--out", default="docs/action_forecast_density.png")
@@ -76,7 +77,7 @@ def main():
             return torch.stack(mus, 1), torch.stack(lvs, 1)
 
     # windows from training clips, normalize
-    X, A, Yin, Y, G = windows(train, args.t_in, 5, 2)
+    X, A, Yin, Y, G = windows(train, args.t_in, args.t_out, 2)
     mu_x = X.reshape(-1, X.shape[-1]).mean(0); sd_x = X.reshape(-1, X.shape[-1]).std(0) + 1e-6
     mu_y = Y.reshape(-1, 3).mean(0); sd_y = Y.reshape(-1, 3).std(0) + 1e-6
     Xn = ((X - mu_x) / sd_x).astype(np.float32)
@@ -91,63 +92,72 @@ def main():
         perm = torch.randperm(len(xt))
         for i in range(0, len(xt), 64):
             b = perm[i:i + 64]; opt.zero_grad()
-            mu, lv = model(xt[b], at[b], yl[b], 5)
+            mu, lv = model(xt[b], at[b], yl[b], args.t_out)
             (0.5 * (lv + (yt[b] - mu) ** 2 * torch.exp(-lv)).mean()).backward()
             opt.step()
 
     # --- TEST-set skill (all held-out clips) vs persistence-of-fast ---
     model.eval()
-    Xte, Ate, Yin_te, Yte, _ = windows(test, args.t_in, 5, 2)
+    Xte, Ate, Yin_te, Yte, _ = windows(test, args.t_in, args.t_out, 2)
     with torch.no_grad():
         mu_te, _ = model(torch.tensor(((Xte - mu_x) / sd_x).astype(np.float32)),
                          torch.tensor(Ate),
-                         torch.tensor(((Yin_te[:, -1] - mu_y) / sd_y).astype(np.float32)), 5)
+                         torch.tensor(((Yin_te[:, -1] - mu_y) / sd_y).astype(np.float32)), args.t_out)
         mu_te = mu_te.numpy() * sd_y + mu_y
-    persist_te = np.repeat(Yin_te[:, -1:], 5, 1)
+    persist_te = np.repeat(Yin_te[:, -1:], args.t_out, 1)
     sk_te = 1 - ((mu_te - Yte) ** 2).mean((0, 1)) / (((persist_te - Yte) ** 2).mean((0, 1)) + 1e-12)
     print(f"TEST-set skill vs persistence: {sk_te.mean():+.3f}  (per target {np.round(sk_te,2)})")
 
-    # rolling 1-step-ahead forecast across the visualized TEST clip
+    # HONEST multi-step forecast: at non-overlapping anchors, seed with the true last observed
+    # frame then roll t_out steps forward AUTOREGRESSIVELY (model feeds its OWN predictions).
+    # This is exactly the task the +CV skill measures. Persistence = repeat the last true value.
+    k = args.target
     fn = (vfeat - mu_x) / sd_x
-    tn = (vtarg - mu_y) / sd_y
-    ts, mus, sds, trues = [], [], [], []
+    ho = args.t_out
+    seg_t, seg_mu, seg_sd, seg_pers = [], [], [], []
     with torch.no_grad():
-        for t in range(args.t_in, vfeat.shape[0]):
-            x = torch.tensor(fn[t - args.t_in:t][None], dtype=torch.float32)
-            yl1 = torch.tensor(tn[t - 1][None], dtype=torch.float32)
-            mu, lv = model(x, torch.tensor([vaid]), yl1, 1)
-            k = args.target
-            mus.append(float(mu[0, 0, k]) * sd_y[k] + mu_y[k])
-            sds.append(float(np.exp(0.5 * lv[0, 0, k].item())) * sd_y[k])
-            trues.append(float(vtarg[t, k])); ts.append(t)
-    ts = np.array(ts); mus = np.array(mus); sds = np.array(sds); trues = np.array(trues)
+        for a in range(args.t_in, vfeat.shape[0] - ho, ho):     # non-overlapping anchors
+            x = torch.tensor(fn[a - args.t_in:a][None], dtype=torch.float32)
+            y_last = torch.tensor(((vtarg[a - 1] - mu_y) / sd_y)[None], dtype=torch.float32)
+            mu, lv = model(x, torch.tensor([vaid]), y_last, ho)   # ho-step autoregressive rollout
+            seg_t.append(np.arange(a, a + ho))
+            seg_mu.append(mu[0, :, k].numpy() * sd_y[k] + mu_y[k])
+            seg_sd.append(np.exp(0.5 * lv[0, :, k].numpy()) * sd_y[k])
+            seg_pers.append(np.full(ho, vtarg[a - 1, k]))         # persistence-of-fast
+    ts = np.concatenate(seg_t); mus = np.concatenate(seg_mu)
+    sds = np.concatenate(seg_sd); pers = np.concatenate(seg_pers)
+    trues = vtarg[ts, k]
+    sk_clip = 1 - np.mean((mus - trues) ** 2) / (np.mean((pers - trues) ** 2) + 1e-12)
 
-    # figure: band + density heatmap
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 7), sharex=True)
-    ax1.plot(ts, trues, "k-", lw=1.8, label="true (fast component)")
-    ax1.plot(ts, mus, "C0-", lw=1.5, label="predicted mean")
-    ax1.fill_between(ts, mus - 2 * sds, mus + 2 * sds, color="C0", alpha=0.18, label="+/-2 sigma")
-    ax1.fill_between(ts, mus - sds, mus + sds, color="C0", alpha=0.30, label="+/-1 sigma")
+    tt = np.arange(args.t_in, vfeat.shape[0])
+    ax1.plot(tt, vtarg[tt, k], "k-", lw=1.6, label="true (fast component)")
+    for i, seg in enumerate(seg_t):                              # each 0.5s forecast segment
+        lab = dict(label="forecast mean (%.1fs, autoregressive)" % (ho / 10)) if i == 0 else {}
+        ax1.plot(seg, seg_mu[i], "C0-", lw=1.6, **lab)
+        ax1.fill_between(seg, seg_mu[i] - 2 * seg_sd[i], seg_mu[i] + 2 * seg_sd[i], color="C0", alpha=0.20,
+                         **(dict(label="+/-2 sigma") if i == 0 else {}))
+    ax1.plot(ts, pers, color="0.6", ls="--", lw=1.0, label="persistence-of-fast")
+    for a in [s[0] for s in seg_t]:
+        ax1.axvline(a, color="0.85", lw=0.6)
     ax1.set_ylabel(f"{TGT}"); ax1.legend(loc="upper right", fontsize=8)
-    ax1.set_title(f"v2 probabilistic forecast on TEST clip — {args.viz_action}, {TGT}  "
-                  f"(test-set mean skill {sk_te.mean():+.2f} vs persistence)")
+    ax1.set_title(f"v2 {ho/10:.1f}s multi-step forecast on TEST clip — {args.viz_action}, {TGT}   "
+                  f"(this clip skill {sk_clip:+.2f}; test-set {sk_te.mean():+.2f} vs persistence)")
 
-    # density map: Gaussian pdf per time column
     lo = float(min((mus - 3 * sds).min(), trues.min()))
     hi = float(max((mus + 3 * sds).max(), trues.max()))
     grid = np.linspace(lo, hi, 200)
     dens = np.exp(-0.5 * ((grid[:, None] - mus[None, :]) / sds[None, :]) ** 2) / (sds[None, :] * np.sqrt(2 * np.pi))
-    ax2.imshow(dens, origin="lower", aspect="auto",
-               extent=[ts[0], ts[-1], lo, hi], cmap="magma")
+    ax2.imshow(dens, origin="lower", aspect="auto", extent=[ts[0], ts[-1], lo, hi], cmap="magma")
     ax2.plot(ts, trues, "c-", lw=1.2, label="true")
-    ax2.set_xlabel("time step (~10 Hz)"); ax2.set_ylabel(f"{TGT}")
+    ax2.set_xlabel("time step (~10 Hz)  |  vertical lines = anchors where forecast restarts from truth")
+    ax2.set_ylabel(f"{TGT}"); ax2.legend(loc="upper right", fontsize=8)
     ax2.set_title("predicted probability density  p(value | past)  (brighter = higher density)")
-    ax2.legend(loc="upper right", fontsize=8)
     fig.tight_layout()
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     fig.savefig(args.out, dpi=120)
     covered = np.mean(np.abs(trues - mus) <= 2 * sds)
-    print(f"[done] {args.out}  (this clip: {covered*100:.0f}% of true within +/-2 sigma)")
+    print(f"[done] {args.out}  (this clip skill={sk_clip:+.2f}, {covered*100:.0f}% within +/-2 sigma)")
 
 
 if __name__ == "__main__":

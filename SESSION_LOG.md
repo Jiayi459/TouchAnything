@@ -866,3 +866,23 @@ User: "plot scripts should only plot"; wanted clear structural repo. Done all 4:
 Verified: all compile; train CLI +0.770 + saves ckpt; plot --ckpt loads+plots (no train); plot
 sweep reproduces. runs/ gitignored. Structure now: LIBRARY in src/tactile_forecast (action_dynamics,
 predictability, physical_state, categories), thin CLIs in scripts/ (train_*, plot_*, probe_*, crc/).
+
+### PAST-CONTEXT SWEEP: data-size confound + horizon note + TODO (2026-07-07)
+- Training now SWEEPS past-context (scripts/train_action_dynamics.py --pasts 1,2,3,5,10; future
+  1s = t_out 10). Full-quality result plateaus ~3s: 1s +0.69 / 2s +0.71 / 3s +0.72 / 5s +0.72 /
+  10s +0.71 (reduced epochs25/folds3 demo). Saves a checkpoint per past (runs/ad_<acts>_p<p>s.pt).
+- CONFOUND FOUND (user question): training data size is NOT equal across history lengths. In
+  action_dynamics.windows(), `win = t_in + t_out` and the loop `range(0, T - win + 1, stride)` yields
+  FEWER windows as t_in grows. Measured on Slice+Peel (t_out=10, stride=2): #windows 15,529 (1s) ->
+  15,154 (2s) -> 14,779 (3s) -> 14,029 (5s) -> 12,154 (10s) — the 10s model trains on ~22% LESS data.
+  Also clips with T < t_in+t_out are silently dropped (none here: min clip 114 >= 110 win, by luck).
+  So the plateau/decline at long history is partly LESS DATA, not only decorrelation.
+- TODO (fair comparison, LATER): shared-anchor mode — only forecast at positions a >= max(t_in),
+  same anchors for every t_in, so all history lengths get IDENTICAL window count + identical future
+  targets; only the depth of past differs. Re-run the sweep to see if the 3s sweet spot survives.
+- HORIZON / RUN DIFFERENCES (clarification): the earlier CRC single run
+  `train_action_dynamics.py --actions Slice,Peel` that gave MEAN +0.770 was the pre-sweep version =
+  ONE config, 1s past, **0.5s** forecast (t_out=5), full epochs80/folds5. The new sweep default
+  forecasts **1s** (t_out=10) -> harder -> the 1s-past row is +0.69, not +0.77. Same-machine reruns
+  are reproducible (same code+data+seed); the local demo used reduced epochs25/folds3 (slightly
+  different numbers, same trend) vs a full CRC/local run at epochs80/folds5.

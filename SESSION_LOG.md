@@ -848,3 +848,21 @@ feedback demo; pour is the weakest fit despite being "most predictable" in the r
 Horizon sweep (pooled): skill 0.74/0.68/0.62/0.58 at 0.5/1.0/1.5/2.0 s (gentle decay; 1 s a good
 operating point). 0.73 "skill" is dimensionless (1-MSE/MSE_persistence); CoP in [-1,1] grid units
 (not mm), force uncalibrated.
+
+### REFACTOR: library / thin-CLI separation for the v2 forecaster (2026-07-07)
+User: "plot scripts should only plot"; wanted clear structural repo. Done all 4:
+1. NEW `src/tactile_forecast/action_dynamics.py` = LIBRARY (single source of truth): slow_fast,
+   build_features, load_pooled, windows, split_train_test, Norm, ProbGRU, train(), evaluate(),
+   forecast_clip(), save()/load() checkpoint. (Convention: src/ = importable nouns; scripts/ = verbs.)
+2. `scripts/train_action_dynamics.py` slimmed to a CLI: k-fold CV report + train final on all clips
+   + SAVE checkpoint to runs/ (gitignored). No model code. CV reproduces: Slice+Peel MEAN +0.770.
+3. `scripts/plot_action_forecast.py` slimmed to plotting only: `--ckpt` loads a saved model (no
+   training) OR default sweeps past-context (1/2/3/5/10s) training via the library. No model/train
+   code; no more script->script import. Sweep skills reproduce (0.69/0.71/0.72...).
+4. RENAMED probes to verbs: predictability_by_category.py->probe_egotouch.py,
+   opentouch_predictability.py->probe_opentouch.py, actionsense_predictability.py->probe_actionsense.py
+   (git mv, history kept). Fixed the one functional ref (stream_actionsense.sh PROBE path) and
+   removed probe_egotouch's script->script import (now imports categorize from the package).
+Verified: all compile; train CLI +0.770 + saves ckpt; plot --ckpt loads+plots (no train); plot
+sweep reproduces. runs/ gitignored. Structure now: LIBRARY in src/tactile_forecast (action_dynamics,
+predictability, physical_state, categories), thin CLIs in scripts/ (train_*, plot_*, probe_*, crc/).

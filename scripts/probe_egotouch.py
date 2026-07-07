@@ -35,9 +35,12 @@ import glob
 import os
 from collections import defaultdict
 
+import sys
+
 import numpy as np
 
-from categorize_actions import categorize  # verb -> action category
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.tactile_forecast.categories import categorize  # verb -> action category
 
 ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                     "datasets", "EgoTouch")

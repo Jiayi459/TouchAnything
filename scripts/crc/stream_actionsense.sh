@@ -7,7 +7,7 @@
 set -uo pipefail
 
 REPO="$HOME/TouchAnything"
-PROBE="$REPO/scripts/actionsense_predictability.py"
+PROBE="$REPO/scripts/probe_actionsense.py"
 DEST="${1:-$HOME/actionsense}"
 ACC="$DEST/acc.jsonl"
 mkdir -p "$DEST"

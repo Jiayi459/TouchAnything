@@ -12,7 +12,7 @@ shared categorize_phrase() taxonomy. Metrics from src/tactile_forecast/predictab
 Subjects S00-S05 wore tactile gloves; S06-S09 did not (files auto-skip: no tactile stream).
 
 Usage (run from repo root):
-    python scripts/actionsense_predictability.py --data-dir ~/actionsense
+    python scripts/probe_actionsense.py --data-dir ~/actionsense
 """
 from __future__ import annotations
 

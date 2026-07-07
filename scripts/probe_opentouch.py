@@ -14,8 +14,8 @@ are directly comparable across datasets. Metrics come from the shared
 src/tactile_forecast/predictability.py (identical math to the EgoTouch probe).
 
 Usage (run from repo root, on CRC after `bash scripts/download_data.sh`):
-    python scripts/opentouch_predictability.py --data-dir data --labels final_annotations --inspect
-    python scripts/opentouch_predictability.py --data-dir data --labels final_annotations
+    python scripts/probe_opentouch.py --data-dir data --labels final_annotations --inspect
+    python scripts/probe_opentouch.py --data-dir data --labels final_annotations
 """
 from __future__ import annotations
 

@@ -886,3 +886,29 @@ predictability, physical_state, categories), thin CLIs in scripts/ (train_*, plo
   forecasts **1s** (t_out=10) -> harder -> the 1s-past row is +0.69, not +0.77. Same-machine reruns
   are reproducible (same code+data+seed); the local demo used reduced epochs25/folds3 (slightly
   different numbers, same trend) vs a full CRC/local run at epochs80/folds5.
+
+### PLAN (approved 2026-07-08) — causal filter + raw-vs-highpass ablation + leakage checklist
+User-approved changes (implementing now):
+1. CAUSAL FILTER: action_dynamics.slow_fast filtfilt -> sosfilt (butter output='sos', forward-only).
+   Rationale: filtfilt is non-causal (backward pass sees the future) -> the fast component leaks
+   future info into both input and target for a forecasting task. sosfilt is causal. Also make
+   velocity causal (np.gradient central-diff -> backward diff). Cost: startup transient -> cut
+   first 5s (=50 frames @10Hz) per clip, in BOTH train and eval.
+2. RAW-vs-HIGHPASS ablation (only the INPUT changes; target always fast [F,x,y]):
+   input_mode='highpass' = [F_fast,x_fast,y_fast,F_slow,vx,vy] (current);
+   input_mode='raw'      = [F,x,y,vx,vy] (no decomposition).
+3. REPORT by every channel (F, CoP-x, CoP-y) x every history (1/2/3/5/10s) x per-forecast-step
+   (+0.1..+1.0s) x each HAND (left=ch0, right=ch1, reported separately, not just active). Print
+   history x channel tables per (input_mode, hand); write a full CSV with all breakdowns.
+4. Pipeline order (confirmed, unchanged): raw field -> per-frame F + CoP -> causal high-pass ->
+   z-score (train stats). z-score stays AFTER the filter.
+5. LEAKAGE CHECKLIST: scripts/check_leakage.py (runnable, PASS/FAIL, run before every training) +
+   docs/leakage_checklist.md. Six checks: (1) filter causal (impulse test), (2) norm stats
+   train-only, (3) split by trajectory/no clip overlap, (4) input strictly before target,
+   (5) baseline sees same past-only input, (6) pipeline order (CoP/force before filter; z-score
+   train-only + consistent train/test).
+FILES: action_dynamics.py (sosfilt, causal velocity, build_features input_mode+hand+warmup,
+evaluate per-step), train_action_dynamics.py (--input-mode, --hands, per-step, CSV),
+plot_action_forecast.py + plot_test_results.py (input_mode/hand passthrough), NEW check_leakage.py,
+NEW docs/leakage_checklist.md. NO re-extraction needed (filter applied at load from committed states).
+EXPERIMENT: rerun sweep raw vs highpass, both hands, on CRC -> compare.

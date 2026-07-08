@@ -35,6 +35,8 @@ def main():
     ap.add_argument("--target", type=int, default=0, help="0=F_fast 1=x_fast 2=y_fast")
     ap.add_argument("--downsample", type=int, default=3)
     ap.add_argument("--cut", type=float, default=0.4)
+    ap.add_argument("--input-mode", default="highpass", help="raw | highpass (sweep mode)")
+    ap.add_argument("--hand", default="active", help="left | right | active (sweep mode)")
     ap.add_argument("--pasts", default="1,2,3,5,10", help="past-context lengths (s) to sweep")
     ap.add_argument("--future-sec", type=float, default=1.0)
     ap.add_argument("--hidden", type=int, default=48)
@@ -53,16 +55,18 @@ def main():
     if args.ckpt:        # ---- MODE 1: load one checkpoint and plot it ----
         model, norm, meta = AD.load(args.ckpt)
         subs = meta["subs"]
-        data = AD.load_pooled(args.root, subs, meta["downsample"], meta["cut"])
+        data = AD.load_pooled(args.root, subs, meta["downsample"], meta["cut"],
+                              input_mode=meta.get("input_mode", "highpass"), hand=meta.get("hand", "active"))
         viz_i = pick_viz(data, subs, args.viz_action)
         _, test_ids = AD.split_train_test(len(data), force_test=[viz_i])
         vtarg = data[viz_i][1]
         fc = AD.forecast_clip(model, norm, data[viz_i], meta["t_in"], meta["t_out"], k)
-        _, mean_sk, _ = AD.evaluate(model, norm, [data[i] for i in test_ids], meta["t_in"], meta["t_out"])
+        _, _, mean_sk, _ = AD.evaluate(model, norm, [data[i] for i in test_ids], meta["t_in"], meta["t_out"])
         panels.append((f"checkpoint {os.path.basename(args.ckpt)}", meta["t_in"], fc, mean_sk))
     else:                # ---- MODE 2: sweep past-context, training via the library ----
         subs = [s.strip() for s in args.actions.split(",")]
-        data = AD.load_pooled(args.root, subs, args.downsample, args.cut)
+        data = AD.load_pooled(args.root, subs, args.downsample, args.cut,
+                              input_mode=args.input_mode, hand=args.hand)
         fps = 30.0 / args.downsample
         t_out = int(round(args.future_sec * fps))
         viz_i = pick_viz(data, subs, args.viz_action)
@@ -74,7 +78,7 @@ def main():
             t_in = int(round(p * fps))
             model, norm = AD.train(train, len(subs), t_in, t_out,
                                    hidden=args.hidden, epochs=args.epochs)
-            _, mean_sk, _ = AD.evaluate(model, norm, test, t_in, t_out)
+            _, _, mean_sk, _ = AD.evaluate(model, norm, test, t_in, t_out)
             fc = AD.forecast_clip(model, norm, data[viz_i], t_in, t_out, k)
             panels.append((f"past {p:.0f}s -> next {args.future_sec:.0f}s", t_in, fc, mean_sk))
             print(f"  {panels[-1][0]:<22} test-set skill={mean_sk:+.3f}  this-clip={fc['skill']:+.3f}")

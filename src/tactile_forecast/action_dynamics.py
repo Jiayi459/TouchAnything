@@ -1,12 +1,16 @@
 """v2 physical-state action-dynamics forecaster — the LIBRARY (import, don't run).
 
 Single source of truth for the model + data + training + forecasting used by the thin CLIs
-scripts/train_action_dynamics.py (train -> checkpoint) and scripts/plot_action_forecast.py
-(load checkpoint / train -> plot). See docs/TACTILE_FORECAST_PLAN.md.
+scripts/train_action_dynamics.py and scripts/plot_action_forecast.py. See docs/TACTILE_FORECAST_PLAN.md.
 
 Idea: split each physical-state signal (force, center-of-pressure) into a slow (grip/postural)
-and a fast (stroke/pour) component; forecast the FAST component of the active hand with a
-probabilistic GRU (mean + variance). Baseline = persistence-of-fast.
+and a fast (stroke/pour) component; forecast the FAST component with a probabilistic GRU
+(mean + variance). Baseline = persistence-of-fast.
+
+CAUSALITY: the slow/fast split uses a CAUSAL forward-only filter (sosfilt) and velocities use a
+CAUSAL backward difference, so no feature at time t depends on any future sample (required for a
+forecasting task — filtfilt would leak the future). The causal filter has a startup transient, so
+the first `warmup_sec` seconds of every clip are dropped (in both training and evaluation).
 """
 from __future__ import annotations
 
@@ -17,40 +21,67 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 import torch.nn as nn
-from scipy.signal import butter, filtfilt
+from scipy.signal import butter, sosfilt
 
-FEATS = ("F_fast", "x_fast", "y_fast", "F_slow", "vx", "vy")   # per-frame model input (6)
-TARGETS = ("F_fast", "x_fast", "y_fast")                        # per-frame model output (3)
+FEATS_HIGHPASS = ("F_fast", "x_fast", "y_fast", "F_slow", "vx", "vy")   # decomposed input (6)
+FEATS_RAW = ("F", "x", "y", "vx", "vy")                                 # raw input, no split (5)
+TARGETS = ("F_fast", "x_fast", "y_fast")                                # output = fast (3)
+HANDS = {"left": 0, "right": 1}                                         # state channel per hand
+
+
+def feats_for(input_mode):
+    return FEATS_HIGHPASS if input_mode == "highpass" else FEATS_RAW
 
 
 # --------------------------------------------------------------------------- #
-# Signal processing + features
+# Signal processing + features  (all CAUSAL)
 # --------------------------------------------------------------------------- #
 def slow_fast(sig, fps, cut):
-    """Low/high-pass split: slow = zero-phase Butterworth low-pass; fast = sig - slow."""
-    b, a = butter(2, cut / (fps / 2.0), "low")
-    slow = filtfilt(b, a, sig, axis=0)
+    """CAUSAL low/high-pass split: slow = forward-only Butterworth low-pass (sosfilt);
+    fast = sig - slow. Output at t uses only samples <= t (no future leakage)."""
+    sos = butter(2, cut / (fps / 2.0), "low", output="sos")
+    slow = sosfilt(sos, sig, axis=0)
     return slow, sig - slow
 
 
-def build_features(state, fps, cut, ds):
-    """state (T,C,6) physical moments -> (feat (T',6), target (T',3)) for the ACTIVE hand."""
+def _causal_diff(sig, fps):
+    """Backward difference velocity (causal): v[t] = (sig[t]-sig[t-1])*fps, v[0]=0."""
+    v = np.zeros_like(sig)
+    v[1:] = np.diff(sig) * fps
+    return v
+
+
+def build_features(state, fps_raw, cut, ds, input_mode="highpass", hand="active", warmup_sec=5.0):
+    """state (T,C,6) -> (feat (T',D), target (T',3)) for one hand.
+
+    hand: 'left' | 'right' | 'active' (active = highest mean force).
+    input_mode: 'highpass' -> [F_fast,x_fast,y_fast,F_slow,vx,vy]; 'raw' -> [F,x,y,vx,vy].
+    target: always fast [F_fast,x_fast,y_fast].
+    warmup_sec: drop the leading filter-transient (both train & eval)."""
     state = state[::ds]
-    fps = fps / ds
-    h = int(np.argmax(state[:, :, 0].mean(0)))          # active hand = highest mean force
+    fps = fps_raw / ds
+    if hand == "active":
+        h = int(np.argmax(state[:, :, 0].mean(0)))
+    else:
+        h = HANDS[hand]
     F, x, y = state[:, h, 0], state[:, h, 1], state[:, h, 2]
     Fs, Ff = slow_fast(F, fps, cut)
     _, xf = slow_fast(x, fps, cut)
     _, yf = slow_fast(y, fps, cut)
-    vx, vy = np.gradient(x) * fps, np.gradient(y) * fps
+    vx, vy = _causal_diff(x, fps), _causal_diff(y, fps)
     target = np.stack([Ff, xf, yf], 1).astype(np.float32)
-    feat = np.stack([Ff, xf, yf, Fs, vx, vy], 1).astype(np.float32)
-    return feat, target
+    if input_mode == "highpass":
+        feat = np.stack([Ff, xf, yf, Fs, vx, vy], 1).astype(np.float32)
+    else:  # raw
+        feat = np.stack([F, x, y, vx, vy], 1).astype(np.float32)
+    w = int(round(warmup_sec * fps))
+    return feat[w:], target[w:]
 
 
-def load_pooled(root, action_subs, ds, cut, fps_default=30.0, min_len=20):
-    """Read the state dataset -> list of (feat, target, action_id). Matches a clip to an
-    action if its label STARTS WITH the action string (so 'Slice' != 'Spread ... bread slice')."""
+def load_pooled(root, action_subs, ds, cut, input_mode="highpass", hand="active",
+                warmup_sec=5.0, fps_default=30.0, min_len=20):
+    """Read the state dataset -> list of (feat, target, action_id) for one hand + input_mode.
+    Matches a clip to an action if its label STARTS WITH the action string."""
     rows = [json.loads(l) for l in open(os.path.join(root, "manifest.jsonl"))]
     data = []
     for r in rows:
@@ -59,14 +90,16 @@ def load_pooled(root, action_subs, ds, cut, fps_default=30.0, min_len=20):
         if aid is None:
             continue
         st = np.load(os.path.join(root, f"state_{r['idx']}.npy"))
-        feat, targ = build_features(st, r.get("fps", fps_default), cut, ds)
+        feat, targ = build_features(st, r.get("fps", fps_default), cut, ds,
+                                    input_mode=input_mode, hand=hand, warmup_sec=warmup_sec)
         if feat.shape[0] >= min_len:
             data.append((feat, targ, aid))
     return data
 
 
 def windows(clips, t_in, t_out, stride):
-    """Sliding (past t_in -> future t_out) windows within each clip (no cross-clip leakage)."""
+    """Sliding (past t_in -> future t_out) windows within each clip. Input frames [s, s+t_in)
+    are STRICTLY before target frames [s+t_in, s+t_in+t_out) — no cross-clip leakage."""
     Xs, As, Yin, Ys, gid = [], [], [], [], []
     for gi, (feat, targ, aid) in enumerate(clips):
         win = t_in + t_out
@@ -74,13 +107,13 @@ def windows(clips, t_in, t_out, stride):
             Xs.append(feat[s:s + t_in]); Yin.append(targ[s:s + t_in])
             Ys.append(targ[s + t_in:s + win]); As.append(aid); gid.append(gi)
     if not Xs:
-        return (np.zeros((0, t_in, len(FEATS)), np.float32), np.zeros(0, int),
+        d = clips[0][0].shape[1] if clips else len(FEATS_HIGHPASS)
+        return (np.zeros((0, t_in, d), np.float32), np.zeros(0, int),
                 np.zeros((0, t_in, 3), np.float32), np.zeros((0, t_out, 3), np.float32), np.zeros(0, int))
     return np.stack(Xs), np.array(As), np.stack(Yin), np.stack(Ys), np.array(gid)
 
 
 def split_train_test(n, frac=0.25, seed=1, force_test=()):
-    """Return (train_ids, test_ids) over clip indices; force_test clips are put in test."""
     rng = np.random.default_rng(seed)
     order = rng.permutation(n)
     n_test = max(2, int(round(frac * n)))
@@ -97,6 +130,7 @@ class Norm:
 
     @classmethod
     def from_clips(cls, clips):
+        """Z-score stats from the GIVEN clips only (pass train clips -> no test leakage)."""
         X = np.concatenate([f for f, _, _ in clips]); Y = np.concatenate([t for _, t, _ in clips])
         return cls(X.mean(0), X.std(0) + 1e-6, Y.mean(0), Y.std(0) + 1e-6)
 
@@ -109,22 +143,22 @@ class ProbGRU(nn.Module):
     def __init__(self, din, n_act, hid):
         super().__init__()
         self.emb = nn.Embedding(n_act, 8)
-        self.enc = nn.GRU(din, hid, batch_first=True)     # summarize the past window
-        self.dec = nn.GRU(3, hid, batch_first=True)       # roll the future forward
-        self.mu = nn.Linear(hid + 8, 3)                   # predicted mean per step
-        self.lv = nn.Linear(hid + 8, 3)                   # predicted log-variance per step
+        self.enc = nn.GRU(din, hid, batch_first=True)
+        self.dec = nn.GRU(3, hid, batch_first=True)
+        self.mu = nn.Linear(hid + 8, 3)
+        self.lv = nn.Linear(hid + 8, 3)
 
     def forward(self, x, aid, y_last, t_out):
         _, h = self.enc(x)
         e = self.emb(aid)
-        inp = y_last.unsqueeze(1)                         # seed = last observed target
+        inp = y_last.unsqueeze(1)
         mus, lvs = [], []
         for _ in range(t_out):
             o, h = self.dec(inp, h)
             oc = torch.cat([o[:, -1], e], -1)
             mu = self.mu(oc); lv = self.lv(oc).clamp(-6, 4)
             mus.append(mu); lvs.append(lv)
-            inp = mu.unsqueeze(1)                         # feed model's OWN prediction back
+            inp = mu.unsqueeze(1)
         return torch.stack(mus, 1), torch.stack(lvs, 1)
 
 
@@ -132,7 +166,6 @@ class ProbGRU(nn.Module):
 # Train / evaluate / forecast
 # --------------------------------------------------------------------------- #
 def train(clips, n_act, t_in, t_out, norm=None, hidden=48, epochs=80, lr=3e-3, seed=0):
-    """Train a ProbGRU on `clips`. Returns (model, norm)."""
     norm = norm or Norm.from_clips(clips)
     X, A, Yin, Y, _ = windows(clips, t_in, t_out, 2)
     xt = torch.tensor(norm.nx(X)); at = torch.tensor(A)
@@ -145,28 +178,31 @@ def train(clips, n_act, t_in, t_out, norm=None, hidden=48, epochs=80, lr=3e-3, s
         for i in range(0, len(xt), 64):
             b = perm[i:i + 64]; opt.zero_grad()
             mu, lv = m(xt[b], at[b], yl[b], t_out)
-            (0.5 * (lv + (yt[b] - mu) ** 2 * torch.exp(-lv)).mean()).backward()   # Gaussian NLL
+            (0.5 * (lv + (yt[b] - mu) ** 2 * torch.exp(-lv)).mean()).backward()
             opt.step()
     return m, norm
 
 
 def evaluate(model, norm, clips, t_in, t_out):
-    """Skill (per target + mean) vs persistence-of-fast, and band coverage@2sd, on `clips`."""
+    """Return (skill_per_target (3,), skill_per_step (t_out,3), mean_skill, coverage@2sd).
+    Skill = 1 - MSE_model/MSE_persistence, in RAW units (a scale-free ratio)."""
     X, A, Yin, Y, _ = windows(clips, t_in, t_out, 2)
     model.eval()
     with torch.no_grad():
         mu, lv = model(torch.tensor(norm.nx(X)), torch.tensor(A),
                        torch.tensor(norm.ny(Yin)[:, -1]), t_out)
     mu = norm.dy(mu.numpy()); sd = np.sqrt(np.exp(lv.numpy())) * norm.sd_y
-    pers = np.repeat(Yin[:, -1:], t_out, 1)
-    sk = 1 - ((mu - Y) ** 2).mean((0, 1)) / (((pers - Y) ** 2).mean((0, 1)) + 1e-12)
+    pers = np.repeat(Yin[:, -1:], t_out, 1)                 # persistence uses only the past
+    em = (mu - Y) ** 2; ep = (pers - Y) ** 2                # (N, t_out, 3)
+    sk_target = 1 - em.mean((0, 1)) / (ep.mean((0, 1)) + 1e-12)     # per channel
+    sk_step = 1 - em.mean(0) / (ep.mean(0) + 1e-12)                 # per (step, channel)
     cov = float((np.abs(Y - mu) <= 2 * sd).mean())
-    return sk, float(sk.mean()), cov
+    return sk_target, sk_step, float(sk_target.mean()), cov
 
 
 def forecast_clip(model, norm, clip, t_in, t_out, target=0):
     """Honest multi-step forecast on one clip: at non-overlapping anchors, seed once with the
-    true last frame then roll t_out steps on the model's OWN predictions. Returns a dict."""
+    true last frame then roll t_out steps on the model's OWN predictions."""
     feat, targ, aid = clip
     k = target
     fn = norm.nx(feat)
@@ -199,9 +235,8 @@ def save(path, model, norm, meta):
 
 
 def load(path):
-    """Return (model, norm, meta)."""
     ck = torch.load(path, map_location="cpu", weights_only=False)
     meta = ck["meta"]
-    m = ProbGRU(len(FEATS), meta["n_act"], meta["hidden"])
+    m = ProbGRU(meta["din"], meta["n_act"], meta["hidden"])
     m.load_state_dict(ck["model"]); m.eval()
     return m, Norm(*ck["norm"]), meta

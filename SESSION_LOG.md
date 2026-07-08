@@ -912,3 +912,21 @@ evaluate per-step), train_action_dynamics.py (--input-mode, --hands, per-step, C
 plot_action_forecast.py + plot_test_results.py (input_mode/hand passthrough), NEW check_leakage.py,
 NEW docs/leakage_checklist.md. NO re-extraction needed (filter applied at load from committed states).
 EXPERIMENT: rerun sweep raw vs highpass, both hands, on CRC -> compare.
+
+### IMPLEMENTED: causal filter + ablation + leakage checklist — RESULTS (2026-07-08)
+All 6 leakage checks PASS (scripts/check_leakage.py) after filtfilt->sosfilt + causal velocity.
+Reduced demo (epochs15/folds3, pasts 1&3, both hands, raw&highpass) — full run needed to finalize:
+- BIG FINDING: causal filter DROPS skill from ~+0.70 (old non-causal, epochs25) to ~+0.51-0.54
+  (causal, epochs15). Part is fewer epochs, but the direction confirms filtfilt was LEAKING future
+  info into the fast target and inflating skill. Full epochs80/folds5 run (CRC) will quantify the
+  honest causal skill.
+- RAW ~= HIGHPASS: raw-input vs highpass-input give nearly identical skill (left 0.510 vs 0.513;
+  right 0.543 vs 0.540) -> the explicit slow/fast INPUT decomposition is UNNECESSARY; the model
+  predicts the fast target equally well from raw signals. (Ablation answered.)
+- HANDS: right hand slightly > left (~+0.54 vs ~+0.51) for Slice/Peel (right = dominant/tool hand).
+- PER-STEP: skill RISES with forecast horizon (+0.11 @0.1s -> +0.59 @1.0s). Correct + expected:
+  skill is vs persistence-of-fast, which is strong at 0.1s (autocorr ~0.8) but collapses by 1s
+  (fast reverses), so the model's ADVANTAGE grows with horizon.
+- Full per-(input_mode,hand,history,step,channel) breakdown -> docs/action_dynamics_results.csv.
+NEXT: run full matrix on CRC (python scripts/check_leakage.py && python scripts/train_action_dynamics.py
+--actions Slice,Peel) for the honest causal numbers; compare raw vs highpass definitively.

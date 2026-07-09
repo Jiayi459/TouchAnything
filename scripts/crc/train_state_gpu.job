@@ -4,9 +4,11 @@
 # GPU; a CPU node is plenty. Kept on the gpu queue only for consistency with the other jobs;
 # switch `-q gpu -l gpu_card=1` to `-q long` for a pure-CPU slot if the GPU queue is busy.
 # The state dataset (data/actionsense_states/) is committed, so `git pull` is all you need.
+# Runs the full sweep (input_mode x hand x history); survives SSH disconnection (that's the point
+# of a batch job — the foreground front-end run dies when your laptop sleeps).
 # Submit from repo root after `mkdir -p logs`:
 #   qsub scripts/crc/train_state_gpu.job
-#   qsub -v ACTIONS="Slice,Peel,Clean",EPOCHS=120,T_OUT=10 scripts/crc/train_state_gpu.job
+#   qsub -v ACTIONS="Slice,Peel",FUTURE_SEC=1.0,EPOCHS=80 scripts/crc/train_state_gpu.job
 # NOTE: no inline comments on #$ lines.
 #$ -M jhao3@nd.edu
 #$ -m abe
@@ -22,11 +24,15 @@ set -euo pipefail
 conda activate tactile
 
 echo "Host: $(hostname)  JOB_ID: ${JOB_ID:-NA}"
-# train_action_dynamics needs scipy (butter/filtfilt); install into the env if missing.
+# needs scipy (butter/sosfilt); install into the env if missing.
 python -c "import scipy" 2>/dev/null || pip install scipy --quiet
+
+# always verify no leakage before training (aborts the job if any check fails, via set -e)
+python scripts/check_leakage.py
 
 python scripts/train_action_dynamics.py \
     --actions "${ACTIONS:-Slice,Peel}" \
-    --t-out "${T_OUT:-5}" \
+    --future-sec "${FUTURE_SEC:-1.0}" \
     --epochs "${EPOCHS:-80}" \
-    --folds "${FOLDS:-5}"
+    --folds "${FOLDS:-5}" \
+    ${EXTRA:-}

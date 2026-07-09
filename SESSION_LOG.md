@@ -930,3 +930,31 @@ Reduced demo (epochs15/folds3, pasts 1&3, both hands, raw&highpass) — full run
 - Full per-(input_mode,hand,history,step,channel) breakdown -> docs/action_dynamics_results.csv.
 NEXT: run full matrix on CRC (python scripts/check_leakage.py && python scripts/train_action_dynamics.py
 --actions Slice,Peel) for the honest causal numbers; compare raw vs highpass definitively.
+
+### FULL CAUSAL RESULT — Slice (CRC job 1169778, 2026-07-09)
+Honest causal run (sosfilt, warmup 5s, all 6 leakage checks PASS). NOTE: ran SLICE ONLY (45 clips)
+— the qsub `-v ACTIONS="Slice,Peel"` comma was split by UGE, dropping Peel; rerun `qsub
+scripts/crc/train_state_gpu.job` (no -v, defaults to Slice,Peel) to add Peel. Results ->
+docs/action_dynamics_results.csv (per input_mode x hand x history x forecast-step x channel).
+
+Pooled MEAN skill vs persistence-of-fast (per history, from the .o tables):
+             1s     2s     3s     5s    10s
+raw/left   +0.402 +0.371 +0.313 +0.305 +0.259
+raw/right  +0.401 +0.384 +0.385 +0.345 +0.294
+hp /left   +0.376 +0.364 +0.335 +0.301 +0.232
+hp /right  +0.392 +0.390 +0.371 +0.331 +0.314
+
+FINDINGS (causal, Slice):
+1. HONEST SKILL ~+0.40 at 1s history (was ~+0.70 with the leaky filtfilt) — the leak inflated by
+   ~0.3. This is the number to report.
+2. RAW ~= HIGHPASS confirmed at full scale: raw 0.40 vs highpass 0.38 (left), 0.40 vs 0.39 (right).
+   The slow/fast INPUT decomposition does NOT help -> can simplify the model to raw input.
+3. MORE HISTORY HURTS: skill DECLINES monotonically 1s->10s (e.g. raw/right 0.40->0.29). Opposite
+   to the old non-causal (which plateaued). Confounded by fewer training windows for longer history
+   (see fair-comparison TODO) — but honest pipeline shows no benefit from >1-2s of past.
+4. RIGHT HAND > LEFT, esp. at long history (10s: right ~0.29-0.31 vs left ~0.23-0.26). Right =
+   dominant/tool hand for slicing; its CoP-x (stroke) is the most predictable channel (x_skill ~0.45-0.48).
+5. PER-STEP: skill starts NEGATIVE at +0.1s (persistence near-perfect that close; model slightly
+   worse), crosses 0 by ~+0.2s, rises to ~+0.48 at +1.0s. Model only beats persistence at >0.2s lead.
+6. CALIBRATION WORSE: coverage@2sd ~0.73-0.85 (was ~0.92 leaky), drops with history (0.83@1s->0.73@10s)
+   -> bands overconfident on the honest (harder) task; a calibration fix / CRPS is warranted.

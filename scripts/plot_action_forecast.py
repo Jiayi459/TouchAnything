@@ -60,8 +60,10 @@ def main():
         viz_i = pick_viz(data, subs, args.viz_action)
         _, test_ids = AD.split_train_test(len(data), force_test=[viz_i])
         vtarg = data[viz_i][1]
-        fc = AD.forecast_clip(model, norm, data[viz_i], meta["t_in"], meta["t_out"], k)
-        _, _, mean_sk, _ = AD.evaluate(model, norm, [data[i] for i in test_ids], meta["t_in"], meta["t_out"])
+        fc = AD.forecast_clip(model, norm, data[viz_i], meta["t_in"], meta["t_out"], k,
+                              sigma_scale=meta.get("sigma_scale", 1.0))
+        _, _, mean_sk, _ = AD.evaluate(model, norm, [data[i] for i in test_ids], meta["t_in"],
+                                       meta["t_out"], sigma_scale=meta.get("sigma_scale", 1.0))
         panels.append((f"checkpoint {os.path.basename(args.ckpt)}", meta["t_in"], fc, mean_sk))
     else:                # ---- MODE 2: sweep past-context, training via the library ----
         subs = [s.strip() for s in args.actions.split(",")]

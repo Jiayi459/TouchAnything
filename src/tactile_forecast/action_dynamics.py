@@ -183,26 +183,41 @@ def train(clips, n_act, t_in, t_out, norm=None, hidden=48, epochs=80, lr=3e-3, s
     return m, norm
 
 
-def evaluate(model, norm, clips, t_in, t_out):
-    """Return (skill_per_target (3,), skill_per_step (t_out,3), mean_skill, coverage@2sd).
-    Skill = 1 - MSE_model/MSE_persistence, in RAW units (a scale-free ratio)."""
+def _predict(model, norm, clips, t_in, t_out):
     X, A, Yin, Y, _ = windows(clips, t_in, t_out, 2)
     model.eval()
     with torch.no_grad():
         mu, lv = model(torch.tensor(norm.nx(X)), torch.tensor(A),
                        torch.tensor(norm.ny(Yin)[:, -1]), t_out)
     mu = norm.dy(mu.numpy()); sd = np.sqrt(np.exp(lv.numpy())) * norm.sd_y
-    pers = np.repeat(Yin[:, -1:], t_out, 1)                 # persistence uses only the past
+    pers = np.repeat(Yin[:, -1:], t_out, 1)
+    return mu, sd, Y, pers
+
+
+def calibrate_sigma(model, norm, val_clips, t_in, t_out, target=0.95):
+    """Post-hoc scalar sigma-scale s so that coverage@2sd ~= `target` on a VALIDATION set.
+    Neural nets underestimate sigma (overconfident); scaling sd by s makes the +/-2sd band honest.
+    s = percentile(|Y-mu|/sd, 100*target) / 2  ->  2*s*sd then contains `target` of the residuals."""
+    mu, sd, Y, _ = _predict(model, norm, val_clips, t_in, t_out)
+    r = np.abs(Y - mu) / (sd + 1e-9)
+    return float(np.percentile(r, 100 * target) / 2.0)
+
+
+def evaluate(model, norm, clips, t_in, t_out, sigma_scale=1.0):
+    """Return (skill_per_target (3,), skill_per_step (t_out,3), mean_skill, coverage@2sd).
+    Skill = 1 - MSE_model/MSE_persistence (scale-free). coverage uses the calibrated sigma_scale."""
+    mu, sd, Y, pers = _predict(model, norm, clips, t_in, t_out)
     em = (mu - Y) ** 2; ep = (pers - Y) ** 2                # (N, t_out, 3)
     sk_target = 1 - em.mean((0, 1)) / (ep.mean((0, 1)) + 1e-12)     # per channel
     sk_step = 1 - em.mean(0) / (ep.mean(0) + 1e-12)                 # per (step, channel)
-    cov = float((np.abs(Y - mu) <= 2 * sd).mean())
+    cov = float((np.abs(Y - mu) <= 2 * sigma_scale * sd).mean())
     return sk_target, sk_step, float(sk_target.mean()), cov
 
 
-def forecast_clip(model, norm, clip, t_in, t_out, target=0):
+def forecast_clip(model, norm, clip, t_in, t_out, target=0, sigma_scale=1.0):
     """Honest multi-step forecast on one clip: at non-overlapping anchors, seed once with the
-    true last frame then roll t_out steps on the model's OWN predictions."""
+    true last frame then roll t_out steps on the model's OWN predictions. sigma_scale calibrates
+    the predicted std for the +/-2sd bands."""
     feat, targ, aid = clip
     k = target
     fn = norm.nx(feat)
@@ -215,7 +230,7 @@ def forecast_clip(model, norm, clip, t_in, t_out, target=0):
             mu, lv = model(x, torch.tensor([aid]), yl, t_out)
             t = np.arange(a, a + t_out)
             seg.append((t, norm.dy(mu[0].numpy())[:, k],
-                        np.sqrt(np.exp(lv[0, :, k].numpy())) * norm.sd_y[k],
+                        np.sqrt(np.exp(lv[0, :, k].numpy())) * norm.sd_y[k] * sigma_scale,
                         np.full(t_out, targ[a - 1, k])))
     ts = np.concatenate([s[0] for s in seg]); mus = np.concatenate([s[1] for s in seg])
     sds = np.concatenate([s[2] for s in seg]); pers = np.concatenate([s[3] for s in seg])

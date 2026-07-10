@@ -982,3 +982,16 @@ FINDINGS (consistent with Slice-only, adding Peel):
    right hand (Peel helps short-horizon).
 5. COVERAGE ~0.76-0.86 (overconfident, drops with history) -> calibration fix next (post-hoc sigma
    scaling to hit ~0.95).
+
+### CALIBRATION FIX implemented (2026-07-10)
+Post-hoc sigma-scaling to fix overconfident bands (coverage was ~0.76-0.86 << 0.95 ideal).
+- action_dynamics.calibrate_sigma(model, norm, val_clips, t_in, t_out, target=0.95): s =
+  percentile(|Y-mu|/sd, 95)/2 -> scaling sd by s makes +/-2sd contain ~95%. Fit on a VAL set.
+- evaluate(..., sigma_scale) applies it to coverage; forecast_clip(..., sigma_scale) to the bands.
+- train_action_dynamics CV: per fold hold out a VAL subset of TRAIN, calibrate on it, report BOTH
+  covRaw and covCal on the test fold; CSV gains coverage_raw + coverage_cal. Final checkpoints train
+  on 85%, calibrate sigma on 15%, store sigma_scale in meta; plots apply it.
+- VERIFIED (reduced raw/right): covRaw 0.90-0.91 -> covCal 0.95-0.96. On the low-coverage configs
+  (~0.76) the scale is larger and still lifts to ~0.95. Skill unchanged (calibration only rescales
+  uncertainty, not the mean).
+- NEXT: rerun full matrix on CRC (qsub) to get calibrated coverage in the CSV.

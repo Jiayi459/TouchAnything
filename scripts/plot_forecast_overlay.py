@@ -1,10 +1,9 @@
-"""Overlay the real tactile signal with the 1 s forecasts of the 5 history-length models.
+"""Real tactile signal vs each history model's 1 s forecast — one figure per channel.
 
-For 2 held-out TEST clips x both hands x 3 channels (F, CoP-x, CoP-y): plot the true fast signal
-plus the rolling 1 s forecast of each of the 5 past-context models (1/2/3/5/10 s) on the same axes
-(6 lines/panel). All models forecast 1 s; they differ only in how much past they see (so a longer-
-history model's forecast starts later in the clip). Saved to docs/forecast_overlay.png
-(results_summary.png is left untouched).
+To avoid clutter, every history model is drawn in its OWN subplot (real + that one forecast),
+and the three channels (F, CoP-x, CoP-y) go to three separate figures. Grid per figure:
+rows = past-context (1/2/3/5/10 s), cols = (test clip x hand). x-axis in seconds; y-axis labelled
+with units. Writes docs/forecast_<F|CoPx|CoPy>.png (results_summary.png untouched).
 
     python scripts/plot_forecast_overlay.py --actions Slice,Peel --input-mode raw
 """
@@ -19,11 +18,16 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.tactile_forecast import action_dynamics as AD  # noqa: E402
 
-CH = ["F (force)", "CoP-x (stroke)", "CoP-y"]
+# (channel index, filename tag, y-axis label with units)
+CHANNELS = [
+    (0, "F",    "fast total force (sensor units, a.u.)"),
+    (1, "CoPx", "fast CoP-x (normalized grid, -1..1)"),
+    (2, "CoPy", "fast CoP-y (normalized grid, -1..1)"),
+]
 
 
 def forecast_all(model, norm, clip, t_in, t_out):
-    """Rolling non-overlapping 1 s forecast, all 3 channels -> (ts, mu (len,3))."""
+    """Rolling non-overlapping 1 s forecast, all 3 channels -> (frame_idx, mu (len,3))."""
     import torch
     feat, targ, aid = clip
     fn = norm.nx(feat)
@@ -48,8 +52,8 @@ def main():
     ap.add_argument("--pasts", default="1,2,3,5,10")
     ap.add_argument("--future-sec", type=float, default=1.0)
     ap.add_argument("--epochs", type=int, default=60)
-    ap.add_argument("--n-clips", type=int, default=2, help="how many test clips to show")
-    ap.add_argument("--out", default="docs/forecast_overlay.png")
+    ap.add_argument("--n-clips", type=int, default=2)
+    ap.add_argument("--out-prefix", default="docs/forecast")
     args = ap.parse_args()
     import matplotlib
     matplotlib.use("Agg")
@@ -59,60 +63,53 @@ def main():
     fps = 30.0 / args.downsample
     t_out = int(round(args.future_sec * fps))
     pasts = [float(p) for p in args.pasts.split(",")]
-    colors = plt.cm.viridis(np.linspace(0, 0.9, len(pasts)))
 
-    # same train/test split + clip indices for both hands (split is by clip index, fixed seed)
     ref = AD.load_pooled(args.root, subs, args.downsample, args.cut, input_mode=args.input_mode, hand="left")
     _, test_ids = AD.split_train_test(len(ref), seed=1)
-    # choose the n longest test clips (need >= max_t_in + t_out frames)
     max_tin = int(round(max(pasts) * fps))
     viz_ids = [i for i in test_ids if ref[i][0].shape[0] >= max_tin + t_out][:args.n_clips]
     print(f"visualizing test clips {viz_ids} (both hands); training {len(pasts)} history models/hand")
 
-    # train per hand, forecast the viz clips
-    results = {}   # (hand, clip_idx) -> (true (T,3), {past: (ts, mu(len,3))})
+    results = {}   # (hand, clip) -> (true (T,3), {past: (frame_idx, mu(len,3))})
     for hand in ["left", "right"]:
         data = AD.load_pooled(args.root, subs, args.downsample, args.cut,
                               input_mode=args.input_mode, hand=hand)
         train = [d for i, d in enumerate(data) if i not in test_ids]
-        models = {}
-        for p in pasts:
-            t_in = int(round(p * fps))
-            models[p] = AD.train(train, len(subs), t_in, t_out, epochs=args.epochs)
+        models = {p: AD.train(train, len(subs), int(round(p * fps)), t_out, epochs=args.epochs)
+                  for p in pasts}                                   # train once per history
         for ci in viz_ids:
-            preds = {}
-            for p in pasts:
-                m, norm = models[p]
-                preds[p] = forecast_all(m, norm, data[ci], int(round(p * fps)), t_out)
+            preds = {p: forecast_all(m, norm, data[ci], int(round(p * fps)), t_out)
+                     for p, (m, norm) in models.items()}
             results[(hand, ci)] = (data[ci][1], preds)
         print(f"  hand={hand} done")
 
-    # grid: rows = (clip, hand), cols = 3 channels
-    rows = [(ci, hand) for ci in viz_ids for hand in ["left", "right"]]
-    fig, axes = plt.subplots(len(rows), 3, figsize=(16, 3.0 * len(rows)), squeeze=False)
-    for ri, (ci, hand) in enumerate(rows):
-        true, preds = results[(hand, ci)]
-        for k in range(3):
-            ax = axes[ri, k]
-            ax.plot(np.arange(true.shape[0]), true[:, k], "k-", lw=1.6,
-                    label="real" if ri == 0 and k == 0 else None)
-            for pi, p in enumerate(pasts):
-                ts, mu = preds[p]
-                ax.plot(ts, mu[:, k], "-", color=colors[pi], lw=1.1, alpha=0.85,
-                        label=f"{p:.0f}s hist" if ri == 0 and k == 0 else None)
-            if k == 0:
-                ax.set_ylabel(f"clip {ci} / {hand}")
-            if ri == 0:
-                ax.set_title(CH[k])
-            if ri == len(rows) - 1:
-                ax.set_xlabel("time step (~10 Hz)")
-    axes[0, 0].legend(fontsize=7, ncol=3, loc="upper right")
-    fig.suptitle(f"Real tactile vs 1 s forecasts of 5 history models — {args.input_mode} input "
-                 f"({args.actions})", fontsize=13)
-    fig.tight_layout(rect=[0, 0, 1, 0.98])
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    fig.savefig(args.out, dpi=110)
-    print(f"[done] {args.out}")
+    cols = [(ci, hand) for ci in viz_ids for hand in ["left", "right"]]   # 2 clips x 2 hands
+    for k, tag, ylabel in CHANNELS:
+        fig, axes = plt.subplots(len(pasts), len(cols), figsize=(3.4 * len(cols), 2.2 * len(pasts)),
+                                 squeeze=False, sharex="col")
+        for ri, p in enumerate(pasts):
+            for ciX, (ci, hand) in enumerate(cols):
+                ax = axes[ri, ciX]
+                true, preds = results[(hand, ci)]
+                tt = np.arange(true.shape[0]) / fps
+                ax.plot(tt, true[:, k], "k-", lw=1.3, label="real")
+                fidx, mu = preds[p]
+                ax.plot(fidx / fps, mu[:, k], "-", color="C1", lw=1.3, label=f"{p:.0f}s-hist forecast")
+                if ri == 0:
+                    ax.set_title(f"clip {ci} / {hand} hand", fontsize=9)
+                if ciX == 0:
+                    ax.set_ylabel(f"{p:.0f}s history\n{ylabel}", fontsize=8)
+                if ri == len(pasts) - 1:
+                    ax.set_xlabel("time (s)", fontsize=9)
+                if ri == 0 and ciX == 0:
+                    ax.legend(fontsize=7, loc="upper right")
+                ax.grid(alpha=.25)
+        fig.suptitle(f"{ylabel}  —  real vs 1 s forecast per history model ({args.input_mode} input, {args.actions})",
+                     fontsize=12)
+        fig.tight_layout(rect=[0, 0, 1, 0.97])
+        out = f"{args.out_prefix}_{tag}.png"
+        fig.savefig(out, dpi=110)
+        print(f"[done] {out}")
 
 
 if __name__ == "__main__":

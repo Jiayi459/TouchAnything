@@ -958,3 +958,27 @@ FINDINGS (causal, Slice):
    worse), crosses 0 by ~+0.2s, rises to ~+0.48 at +1.0s. Model only beats persistence at >0.2s lead.
 6. CALIBRATION WORSE: coverage@2sd ~0.73-0.85 (was ~0.92 leaky), drops with history (0.83@1s->0.73@10s)
    -> bands overconfident on the honest (harder) task; a calibration fix / CRPS is warranted.
+
+### FULL CAUSAL RESULT — Slice+Peel (CRC job 1170576, 2026-07-10)
+Honest causal (sosfilt, warmup 5s, leakage checks pass), pooled Slice(45)+Peel(30)=75 clips.
+docs/action_dynamics_results.csv (per input_mode x hand x history x step x channel).
+
+avg-over-steps MEAN skill by (mode, hand, history):
+             1s     2s     3s     5s    10s
+raw/left   +0.365 +0.334 +0.317 +0.304 +0.245
+raw/right  +0.404 +0.409 +0.399 +0.364 +0.322
+hp /left   +0.374 +0.348 +0.343 +0.296 +0.257
+hp /right  +0.427 +0.408 +0.394 +0.369 +0.328
+
+FINDINGS (consistent with Slice-only, adding Peel):
+1. Honest skill ~+0.40 (right hand); RAW ~= HIGHPASS again (hp marginally > raw on right; ~tie on
+   left) -> slow/fast INPUT decomposition still unnecessary. Can simplify to raw input.
+2. RIGHT HAND >> LEFT, and the RIGHT-HAND CoP_x (stroke direction) is by far the most predictable
+   channel: +0.47 @1s and still +0.435 @10s (vs F +0.20-0.37, CoP_y +0.33-0.39). The knife-stroke
+   left-right motion is the dominant, most-forecastable signal.
+3. HISTORY: right hand ~flat 1-3s (+0.40) then declines; left declines from 1s. ~1-3s past optimal
+   (data-size confound still applies; fair-comparison TODO).
+4. PER-STEP: rises with horizon (raw/right 3s: 0.19@0.1s -> 0.50@1.0s); +0.1s now positive for the
+   right hand (Peel helps short-horizon).
+5. COVERAGE ~0.76-0.86 (overconfident, drops with history) -> calibration fix next (post-hoc sigma
+   scaling to hit ~0.95).

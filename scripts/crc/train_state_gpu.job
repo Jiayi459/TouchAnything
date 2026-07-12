@@ -35,4 +35,5 @@ python scripts/train_action_dynamics.py \
     --future-sec "${FUTURE_SEC:-1.0}" \
     --epochs "${EPOCHS:-80}" \
     --folds "${FOLDS:-5}" \
+    --csv "${CSV:-runs/action_dynamics_results.csv}" \
     ${EXTRA:-}

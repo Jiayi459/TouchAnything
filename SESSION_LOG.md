@@ -1108,3 +1108,26 @@ at 1 s. The model has genuine (small) value only at ~0.2-0.5 s lead.
 ### Commits this session
 - `195fc70` regenerate results_summary with calibrated coverage (dashed ~0.95 vs raw ~0.80)
 - horizon plot + script (this session)
+
+### PLAN (2026-07-13) — one-shot vs autoregressive + AR(1) baseline  [awaiting resolution]
+User decisions: (1) build BOTH decoders and compare; (5) add AR(1)/linear-extrapolation baseline.
+
+Planned changes (NOT yet implemented — rule 5):
+1. `action_dynamics.py`: add a `decoder` mode to the model.
+   - `autoregressive` (current): decoder GRU feeds its own prediction back (t_out steps).
+   - `oneshot` (new): single forward pass emits all t_out*3 means + logvars directly
+     (direct head from encoder hidden state; no feed-back -> no rollout error compounding).
+2. `evaluate()`: add an AR(1) baseline forecast; report skill vs persistence AND vs AR(1).
+3. `train_action_dynamics.py`: add `decoder` to the sweep (doubles configs); add `*_ar1` skill
+   columns; keep persistence columns.
+4. `plot_results_summary.py` / `plot_horizon.py`: show both decoders / both baselines.
+5. Re-run sweep, regenerate figures.
+
+OPEN QUESTIONS (need user answers before coding):
+- Q1 One-shot head: direct MLP from encoder hidden (recommended) vs non-autoregressive GRU
+  with a fixed input token?
+- Q2 AR(1) coefficient phi: estimated per-channel on the TRAIN set (stable, recommended) vs
+  per-window from each clip's own history (adaptive)? Or do you want plain linear least-squares
+  slope extrapolation instead of AR(1)?
+- Q3 Report skill vs BOTH persistence and AR(1) (recommended) vs REPLACE persistence with AR(1)?
+- Q4 Re-run where: local (sweep now doubles) vs CRC batch job?

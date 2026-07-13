@@ -995,3 +995,116 @@ Post-hoc sigma-scaling to fix overconfident bands (coverage was ~0.76-0.86 << 0.
   (~0.76) the scale is larger and still lifts to ~0.95. Skill unchanged (calibration only rescales
   uncertainty, not the mean).
 - NEXT: rerun full matrix on CRC (qsub) to get calibrated coverage in the CSV.
+
+### RIGOROUS CODE + RESULTS REVIEW (2026-07-10, on request: "is F prediction too good?")
+
+Scope: full review of action_dynamics pipeline + docs/action_dynamics_results.csv +
+forecast_F/CoPx/CoPy figures. New diagnostic: scripts/tmp_diag_predictability.py (torch-free).
+
+VERIFIED CORRECT (no leakage found):
+- Causal filter (sosfilt) + backward-diff velocity; warmup trim (action_dynamics.py:39-51,77).
+- Window construction: inputs strictly before targets, within-clip only (windows(), :100-113).
+- Split by clip; norm stats from train clips only; sigma calibrated on val held out of train.
+- forecast figures are honest: seeded from TRUE value at each 1 s anchor, then autoregressive
+  (plot_forecast_overlay.py:37-41); test clips excluded from training (test_ids by clip, seed=1).
+- check_leakage.py assertions are sound and match the code.
+
+KEY NEW FINDING - THE SKILL BASELINE IS TOO WEAK; HEADLINE NUMBERS ARE INFLATED:
+The fast target is ANTI-correlated with itself at 1 s lag (variance-weighted AC over the 75
+Slice+Peel clips, both hands, ds=3/cut=0.4/warmup=5: F_fast rho(1.0s) = -0.19, x = -0.18,
+y = -0.14). Persistence MSE at 1 s = 2(1-rho)*var ~ 2.4*var, so trivial baselines score high
+skill-vs-persistence:
+  - predict CONSTANT ZERO @1.0s: F +0.59, x +0.58, y +0.56  (>= GRU's ~0.50-0.54 in the CSV!)
+  - damped persistence (best scalar a*last, a ~ -0.2): +0.57..+0.61 @1.0s
+  - linear ridge (past 1 s of 3 channels): +0.62 @1.0s  (beats the GRU at the far step)
+Per-step zero-baseline skill (mean-channel, all clips): -3.0 @0.1s, -0.38 @0.2s, +0.14 @0.3s,
++0.34 @0.4s, +0.44 @0.5s ... +0.57 @1.0s. The GRU beats BOTH trivial baselines only in the
+~0.2-0.5 s band; by 0.6 s+ shrink-to-zero matches/exceeds it. The avg-over-steps "+0.40 honest
+skill" headline mostly reflects (a) GRU ~ persistence at short steps where zero is terrible and
+(b) GRU ~ shrink-to-zero at long steps where persistence is terrible. Conclusions like
+"right-hand CoP-x most predictable, +0.47" must be re-checked against the zero/damped baselines
+(x @1.0s zero-baseline ~ +0.58 > CSV +0.54).
+ACTION: add zero + damped-persistence + linear-ridge baselines to evaluate() and report skill
+vs the STRONGEST trivial baseline per step.
+
+WHY F LOOKS "TOO GOOD" IN forecast_F.png (mechanism, not leakage):
+1. Re-anchoring: every 1 s segment restarts from the TRUE last value; errors never compound
+   beyond 10 frames. The eye reads 50 concatenated 1 s forecasts as one great long forecast.
+2. F_fast is the smoothest, highest-SNR channel: F = sum over all taxels (spatial averaging),
+   spectral centroid 0.56 Hz => typical period ~1.8 s, so a 1 s forecast is ~half a period of a
+   smooth quasi-periodic stroke cycle seeded from truth. AC(0.1s)=0.91.
+3. Causal-filter group delay near the 0.4 Hz cutoff leaks lagged SLOW trend into the "fast"
+   target - an extra smooth predictable component (affects target definition, not causality).
+4. MSE/NLL training => amplitude shrinkage toward 0 at uncertain times; since the target
+   oscillates around 0, a shrunk forecast still LOOKS close. Visible in the figures (orange
+   amplitude < black).
+Why CoP looks worse: CoP = moment ratio (divide by F) => noise amplified at light contact,
+heavy-tailed spikes that an MSE model rightly ignores; centroid 0.67-0.74 Hz (faster content).
+So: F prediction is NOT suspiciously good - quantitatively it is no better than trivial
+shrinkage at the 1 s step; the visual impression comes from 1-3 above.
+
+OTHER ISSUES (secondary):
+- ACAUSAL PREPROCESSING: physical_state.baseline_correct() subtracts the per-taxel 5th
+  percentile over the WHOLE clip (physical_state.py:68) - uses future frames. Per-clip constant
+  => negligible for the high-passed F target, but changes CoP nonlinearly and is not deployable.
+  Fix: percentile over the first N seconds or a running percentile.
+- hand="active" (action_dynamics.py:63-64) picks the hand from the WHOLE-clip mean force
+  (future info). Default in plot_action_forecast.py only; CSV runs use explicit left/right. OK
+  offline, flag for any online claim.
+- STALE CSV: docs/action_dynamics_results.csv header has `coverage` (one col) but the current
+  train_action_dynamics.py writes coverage_raw+coverage_cal - the CSV predates the calibration
+  fix; regenerate.
+- NO SUBJECT ID in the manifest (probe_actionsense.py:234-237): clip-level split mixes
+  subjects/sessions => results = within-corpus generalization, not new-user.
+- POOLED MSE in raw sensor units => skill dominated by high-amplitude clips (persistence MSE
+  ~1.8e6 a.u.^2). Report per-clip skill median/IQR too.
+- CSV writes fold MEANS only; cross_validate has per-fold arrays - add +/- std.
+- First-step F skill negative (left): decoder gets y_last yet does worse than copying it =>
+  parameterize the decoder as residual from y_last (predict delta).
+- Fragile-but-correct: plot_forecast_overlay derives test_ids from the hand=left clip list and
+  reuses them for hand=right; only safe because load_pooled ordering/length filter is
+  hand-independent. Add an assert.
+
+CONCLUSION for the user question: no implementation bug/leakage makes F "too good"; the figures
+are honest but flattering (1 s re-anchoring). The real problem is the opposite direction: the
+skill-vs-persistence metric OVERSTATES the model because persistence-of-fast is anti-correlated
+at 1 s. The model has genuine (small) value only at ~0.2-0.5 s lead.
+
+---
+
+## Session (2026-07-13) — Method clarifications, horizon plot, two open design decisions
+
+### User's 7 questions — answers (with code evidence)
+1. **Prediction method / "0.1 s steps" / aggregation.** Clarified a conflation:
+   - The 1/2/3/5/10 s are **five independent models** (different past-context), NOT aggregated.
+     Panel (a) compares them; only one history is used per model.
+   - The 0.1 s steps are how **one** model emits its 1 s: an **autoregressive** seq2seq GRU
+     decoder rolls out t_out=10 steps, feeding its OWN prediction back
+     (`action_dynamics.py:156-162`, key line 161 `inp = mu.unsqueeze(1)`).
+   - User wants **one-shot / direct** multi-horizon (single forward pass emits all 10 frames,
+     no feed-back). This is practical (swap decoder for a t_out*3 head), avoids rollout error
+     compounding. **OPEN DECISION #1: switch to one-shot direct?** (would re-run sweep + figures).
+2. **Skill.** `skill = 1 - MSE_model/MSE_persistence` (`action_dynamics.py:210-212`). Persistence =
+   last observed value repeated over all 10 future steps. 0 = tie, +1 = perfect, <0 = worse.
+3. **Raw WAS trained.** The sweep trains both input_modes every run (`train_action_dynamics.py`
+   default `--input-modes raw,highpass`, driven by `train_state_gpu.job:34`). CSV has raw+hp rows;
+   raw/highpass only changes the INPUT, both predict the same high-pass target.
+4. **Horizon plot delivered** — `scripts/plot_horizon.py` -> `docs/horizon_highpass.png`.
+   Calibrated highpass, right hand, 3 s history -> 1 s ahead on test clip 6. Per channel shows:
+   history window consumed (grey), true future (black), forecast mean+calibrated +/-2sigma (blue),
+   persistence (dashed). sigma_scale=1.966. Forecast bends toward truth (F, CoP-x); persistence flat.
+   NOTE: uses the CURRENT autoregressive method; will be re-rendered if we adopt one-shot.
+5. **Persistence baseline — meaningfulness.** For the zero-mean FAST target, persistence is a WEAK
+   floor (last fast value ~0, easy to beat), which flatters skill. **OPEN DECISION #2: add stronger
+   baselines** — zero/mean baseline and AR(1)/linear extrapolation — and report skill vs all three.
+6. **Input = tactile-only.** Confirmed: only the tactile pressure map -> [F, CoP_x, CoP_y]
+   (`action_dynamics.py:67`). NO EMG (Myo), NO Xsens IMU/motion, though ActionSense records them.
+7. Full multi-day documentation pass to be done at session end (this entry is the running log).
+
+### Open questions awaiting user
+- **#1** Switch model from autoregressive rollout to one-shot direct 1 s forecast?
+- **#2** Add zero and AR(1) baselines alongside persistence?
+
+### Commits this session
+- `195fc70` regenerate results_summary with calibrated coverage (dashed ~0.95 vs raw ~0.80)
+- horizon plot + script (this session)

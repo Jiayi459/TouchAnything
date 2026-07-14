@@ -1131,3 +1131,138 @@ OPEN QUESTIONS (need user answers before coding):
   slope extrapolation instead of AR(1)?
 - Q3 Report skill vs BOTH persistence and AR(1) (recommended) vs REPLACE persistence with AR(1)?
 - Q4 Re-run where: local (sweep now doubles) vs CRC batch job?
+
+---
+
+## Session (2026-07-14) — COLD-START ONBOARDING SNAPSHOT (read this to catch up fully)
+
+Purpose: a self-contained state-of-the-project dump. A fresh Claude that reads this section
+(plus the COMPREHENSIVE SUMMARY at ~line 687) should know essentially everything we know.
+
+### 0. One-paragraph orientation
+We forecast the near-future TACTILE dynamics of the hand during smooth manipulation, to later give
+real-time feedback. Data = ActionSense conductive-thread gloves (32x32 taxels/hand, two hands).
+We picked the smoothest, most continuous-force actions — SLICE (cutting) and PEEL — and train a
+small probabilistic GRU to predict the next 1 s of the hand's tactile "physical state" from a few
+seconds of history. Input is TACTILE ONLY (no EMG/Myo, no Xsens IMU). We report skill vs a
+persistence baseline, with calibrated uncertainty bands.
+
+### 1. Data inventory (Slice + Peel) — computed 2026-07-14 from data/actionsense_states/manifest.jsonl
+RAW (full recording length, before warmup cut):
+  Slice: 45 clips, 1705 s (~28.4 min), mean 37.9 s, min 11.3 s, max 220.1 s
+  Peel : 30 clips, 1536 s (~25.6 min), mean 51.2 s, min 31.5 s, max  71.4 s
+  TOTAL: 75 clips/trials, 3241 s (~54 min)
+Trial breakdown (15 reps each): Slice cucumber/potato/bread; Peel cucumber/potato (5 dishes x 15).
+USABLE after 5 s warmup cut/clip: Slice ~1480 s, Peel ~1386 s, ~2866 s (~48 min).
+Each clip is used for BOTH hands separately -> 150 hand-trajectories. Downsample ds=3 -> 10 Hz
+(changes sample count, not seconds). CAVEAT: shortest Slice clip is 11.3 s, so 10 s-history configs
+drop the short clips -> the long-history skill rests on fewer/longer trials (training-size confound).
+
+### 2. End-to-end forecasting pipeline (ORDER MATTERS)
+(a) Upstream (already done, stored in state_N.npy): 32x32 taxel pressure map -> baseline-corrected
+    (per-taxel 5th-percentile subtraction, fixes the untared-glove DC offset) -> per-hand physical
+    MOMENTS [F (total force), CoP_x, CoP_y, sxx, syy, sxy].
+(b) build_features (action_dynamics.py:54): read F/CoP moment channels FIRST, THEN causal high-pass
+    them (slow_fast, butter+sosfilt, CAUSAL). Order = MOMENTS-THEN-HIGHPASS (NOT highpass taxels
+    then moments — that would make CoP, a ratio, blow up when the fast denominator crosses 0).
+    - target = fast [F_fast, x_fast, y_fast] (always).
+    - input_mode highpass -> [F_fast,x_fast,y_fast,F_slow,vx,vy]; raw -> [F,x,y,vx,vy].
+    - velocity vx,vy = causal backward difference. warmup_sec=5 s dropped (filter transient).
+(c) windows (line 100): sliding X=feat[s:s+t_in], Y=targ[s+t_in:s+t_in+t_out]; input strictly
+    before target (no leakage). fps=10 Hz -> t_in = history_s*10, t_out = 1 s = 10 frames.
+(d) Model ProbGRU (line ~140): encoder GRU -> decoder GRU rolled out t_out steps, AUTOREGRESSIVE
+    (line 161 inp = mu.unsqueeze(1) feeds its own prediction back), + action embedding, mu/logvar
+    heads -> Gaussian per step. Loss = Gaussian NLL.
+(e) evaluate/_predict (line 186): skill = 1 - MSE_model/MSE_persistence per channel & per step;
+    coverage@2sd = fraction of truth inside mu +/- 2*sigma_scale*sd.
+(f) calibrate_sigma (line 197): post-hoc scalar so coverage -> ~0.95 on a validation slice.
+
+### 3. THREE code paths & the re-anchoring insight (critical for reading the figures)
+There are three places a forecast is produced; only the OVERLAY PLOT re-anchors:
+  Path A - the model (action_dynamics.py forward): rolls out 1 s from ONE anchor using its OWN
+           predictions; never sees ground truth after the anchor.
+  Path B - the skill metric (_predict): one model call per window, full 1 s rollout, NO mid-forecast
+           refresh -> the reported skill numbers are HONEST 1-second-ahead.
+  Path C - the overlay figure (plot_forecast_overlay.py:37-41): tiles the whole clip into
+           consecutive 1 s blocks, RE-ANCHORS each block to a fresh GROUND-TRUTH window + true seed
+           every 1 s. This makes forecast_F/CoPx/CoPy.png visually HUG the real curve (error can't
+           accumulate past 1 s) — a flattering VISUAL only; it does NOT change the skill numbers.
+  => docs/horizon_highpass.png (single anchor, Path A/B) is the HONEST picture; forecast_*.png is
+     flattering. This resolved the "why do these plots look so different" question.
+
+### 4. Results — skill per config (calibrated CSV docs/action_dynamics_results.csv)
+Mean skill over the 10 forecast steps (0.1..1.0 s); skill = 1 - MSE_model/MSE_persistence:
+  mode/hand/hist    F     CoP-x  CoP-y  mean   cov
+  highpass/right/1s 0.394 0.455  0.390  0.413  0.948   <- best
+  raw/right/1s      0.378 0.461  0.392  0.410  0.942   <- tied (raw ~= highpass)
+  highpass/left/1s  0.355 0.350  0.362  0.356  0.949
+  raw/left/1s       0.318 0.346  0.351  0.338  0.948
+  ... skill DROPS monotonically 1s->10s history for every config (e.g. right/highpass 0.413->0.310).
+Takeaways: (i) raw ~= highpass (input decomposition buys nothing); (ii) right hand > left (+0.05-0.07);
+(iii) CoP-x on the right hand is the standout channel (0.42-0.46, barely decays with history — the
+stroke direction); (iv) more history HURTS (causal filter: old context = noise); (v) coverage
+~0.94-0.95 everywhere (calibrated). Per-step: skill RISES with lead time (persistence degrades faster
+than the model). Full 200-row per-step table is in the CSV.
+CAVEAT: skill is vs PERSISTENCE, a WEAK floor for the zero-mean fast target -> absolute levels are
+flattered; the RANKING should survive a tougher baseline but magnitudes will drop. (-> AR(1) plan.)
+
+### 5. Calibration status
+Coverage@2sd was overconfident (~0.80) -> post-hoc sigma-scaling lifted it to ~0.947 across the
+whole matrix, skill UNCHANGED (calibration rescales the band, not the mean). Two CSVs kept:
+  docs/action_dynamics_results.csv        = calibrated (coverage_raw + coverage_cal)
+  docs/action_dynamics_results_precal.csv = pre-calibration (recovered from git)
+results_summary.png panel (d): solid=raw coverage (~0.80), dashed=calibrated (~0.95), red=ideal.
+
+### 6. File map (what each script is)
+  src/tactile_forecast/action_dynamics.py  = THE library (single source of truth): slow_fast,
+      build_features, load_pooled, windows, Norm, ProbGRU, train, evaluate, calibrate_sigma,
+      forecast_clip, save/load. Plot/CLI scripts import from here; they must not redefine logic.
+  scripts/train_action_dynamics.py = sweep CLI (input_mode x hand x history), k-fold CV, writes CSV.
+  scripts/check_leakage.py         = 6 leakage checks; run before every training (job aborts if fail).
+  scripts/plot_results_summary.py  = 4-panel summary from the CSV (no training).
+  scripts/plot_forecast_overlay.py = whole-clip rolling overlay (Path C, re-anchored; flattering).
+  scripts/plot_horizon.py          = NEW: single-anchor honest view (history + 1 s forecast + band +
+      persistence + truth), per channel -> docs/horizon_highpass.png.
+  scripts/plot_test_results.py     = predicted-vs-true scatter per channel.
+  scripts/probe_*.py               = per-dataset predictability probes (categorization phase).
+  scripts/crc/train_state_gpu.job  = UGE batch job (git pull; check_leakage; run sweep; writes to
+      runs/ which is gitignored to avoid pull collisions). CRC netid jhao3, conda env tactile.
+  data/actionsense_states/         = state_N.npy (committed) + manifest.jsonl; clip_*.npy gitignored.
+
+### 7. This session's Q&A (2026-07-13..14) — condensed
+  - Prediction method: 5 independent history models (NOT aggregated); each emits 1 s via
+    autoregressive rollout. (See Session 2026-07-13 entry #1.)
+  - Skill definition: 1 - MSE_model/MSE_persistence (#2).
+  - Raw WAS trained; raw/highpass only changes input, same target (#3).
+  - Horizon plot delivered (#4). Persistence is a weak baseline (#5). Tactile-only input (#6).
+  - "Why do forecast_*.png and horizon look so different?" -> the three-paths / re-anchoring insight
+    (Section 3 above).
+  - "F/CoP first or highpass first?" -> MOMENTS-THEN-HIGHPASS (Section 2b).
+  - "How much Slice/Peel data?" -> Section 1.
+  - "Skill per entry?" -> Section 4 table.
+
+### 8. CONFIRMED decisions (this session) vs STILL-OPEN questions
+CONFIRMED by user:
+  - Build BOTH decoders (autoregressive + one-shot direct) and compare.
+  - Add an AR(1)/linear-extrapolation baseline (stronger than persistence).
+STILL OPEN (user has NOT answered; do not code until resolved — rule 5):
+  - Q1 One-shot head design: direct MLP from encoder hidden (recommended) vs non-autoregressive GRU
+    with a fixed input token.
+  - Q2 AR(1) coefficient phi: per-channel on TRAIN (stable, recommended) vs per-window (adaptive);
+    or plain linear least-squares slope extrapolation instead of AR(1).
+  - Q3 Report skill vs BOTH persistence and AR(1) (recommended) vs REPLACE persistence.
+  - Q4 Re-run location: CRC batch (recommended) vs local (sweep doubles with 2 decoders).
+PLAN for the implementation is at ~line 1112 (PLAN 2026-07-13).
+
+### 9. Previously-offered but NOT-yet-requested next steps (backlog)
+  - Fair-comparison history run (equal window counts across history lengths).
+  - Add calibrated +/-2sigma bands to the overlay figures.
+  - Simplify model to raw input only (since raw ~= highpass).
+  - Feedback demo on the calibrated right-hand CoP-x model.
+
+### 10. Guardrails / gotchas learned (do not repeat)
+  - CRC: git pull + grep coverage_cal BEFORE every qsub (else the job runs stale code).
+  - Job writes CSV to runs/ (gitignored) to avoid overwriting the tracked docs/ CSV on pull.
+  - filtfilt is NON-CAUSAL (leaks future) -> we use sosfilt (causal). Never reintroduce filtfilt.
+  - Action matching uses label.startswith(action) (substring match wrongly pooled "bread slice").
+  - Windows local shell = PowerShell (.venv\Scripts\python.exe); CRC = bash (plain python).

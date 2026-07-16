@@ -1266,3 +1266,51 @@ PLAN for the implementation is at ~line 1112 (PLAN 2026-07-13).
   - filtfilt is NON-CAUSAL (leaks future) -> we use sosfilt (causal). Never reintroduce filtfilt.
   - Action matching uses label.startswith(action) (substring match wrongly pooled "bread slice").
   - Windows local shell = PowerShell (.venv\Scripts\python.exe); CRC = bash (plain python).
+
+---
+
+## Session (2026-07-16) — PLAN: frozen evaluation harness + classical baselines  [AWAITING RESOLUTION]
+
+User task (also written into CLAUDE.md): build a FROZEN eval harness + 3 classical baselines
+(persistence, seasonal-naive, AR) for tactile forecasting. Do NOT touch/retrain the probGRU.
+Hard constraints: causal-only filtering; no cross-split leakage (fit on TRAIN, select on VAL, touch
+TEST once); global train-derived normalization; CoP masking by force threshold; target-time indexing.
+SE: single YAML config w/ hash, deterministic (identical tables across runs), pytest on synthetic
+signals, modular (metrics/masking/baselines/evaluate/config/tests).
+
+### Repo grounding (verified 2026-07-16) — 5 spec-vs-repo contradictions
+A. RATE: spec "~15 Hz, 15 steps" but manifest fps=30 (all 299 clips), pipeline ds=3 -> 10 Hz
+   effective -> 1 s = 10 steps. (Whether true hardware rate is 30 Hz is a separate open uncertainty.)
+B. TARGET: spec "6-dim raw [F,CoPx,CoPy] x both hands"; probGRU actually predicts 3-dim HIGH-PASS
+   (fast) [F_fast,x_fast,y_fast] for ONE hand (per-hand models). action_dynamics.py:28.
+C. COLLISION: src/tactile_forecast/{baselines.py, eval.py} already exist but belong to the SEPARATE
+   PIXEL-map forecaster (operate on (B,t_in,C,H,W) images; LTO/LOTO/grasp). Must NOT overwrite them.
+D. DEPS: pytest MISSING, statsmodels MISSING (yaml/torch/scipy/numpy OK). Plan: pip install pytest;
+   implement AR with numpy (Yule-Walker/OLS), no statsmodels dependency.
+E. SPLIT: only 2-way split_train_test (seed=1, frac=0.25, by-clip). No VAL, no splits.json. Need a
+   FROZEN 3-way split. Existing probGRU results used the 2-way test set (seed=1).
+GOOD: causal-clean already (only filtfilt is a comment saying not to use it); Norm is global/
+train-derived. Constraints 1 & 3 already satisfied upstream.
+
+### Proposed design (NOT implemented yet)
+- New package `src/tactile_forecast/eval_harness/` (avoids the pixel eval.py/baselines.py collision):
+  metrics.py, masking.py, splits.py, baselines/{persistence,seasonal,ar}.py, evaluate.py, __init__.py
+- `configs/eval_harness.yaml` (repo already uses configs/*.yaml): horizon, history, mask_threshold_pct,
+  ar_orders, seasonal_period_range, ds/fps, paths, split_file. evaluate records sha256(config).
+- `tests/` (new): pytest synthetic tests (sine seasonal, AR(2) recovery, masking, causality).
+- Frozen split -> `data/actionsense_states/splits.json` (train/val/test lists of clip idx).
+- Metrics indexed by TARGET time (t+h) with (t,h) metadata; documented in module docstring.
+- Masking: one function; frame masked for CoP metric iff RAW total force < train per-hand 5th pct;
+  force channels never masked.
+- Determinism: fixed seeds; assert two runs produce byte-identical table.
+
+### OPEN QUESTIONS (blocking — need answers before coding)
+- Q1 TARGET: freeze harness on (a) 6-dim RAW [F,CoPx,CoPy]x2 hands [matches spec text; probGRU not
+  scorable until re-scoped], (b) 3-dim FAST 1-hand [matches current probGRU], or (c) configurable?
+- Q2 RATE/HORIZON: confirm 10 Hz -> 1 s = 10 steps (spec's "15" is wrong for this repo)?
+- Q3 SPLIT: keep the existing seed=1 TEST set unchanged and carve VAL out of its TRAIN (past probGRU
+  test numbers stay comparable), vs define a brand-new frozen 3-way split?
+- Q4 PLACEMENT/DEPS: new `eval_harness/` package (don't touch pixel eval.py/baselines.py) + pip
+  install pytest + AR via numpy (no statsmodels) — OK?
+- Q5 (minor) MASK KEY: mask CoP by RAW total force even when the target is the fast component
+  (recommended — masking reflects physical contact, not the zero-mean fast signal). OK?

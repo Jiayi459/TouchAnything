@@ -1,87 +1,135 @@
 """Frozen evaluation entry point.
 
-Protocol (constraint 2, no leakage):
-  1. Load the frozen split (splits.json). 2. Fit Norm + force thresholds on TRAIN only.
-  3. Each baseline: fit(TRAIN) -> select hyperparams on VAL -> forecast TEST (touched once).
-  4. Score with the frozen metrics + CoP mask. 5. Write a results table stamped with the
-  config hash. Determinism: the whole thing is recomputed twice and asserted identical.
+Protocol (constraint 2, no leakage): load the frozen split -> fit Norm + force thresholds on
+TRAIN -> each baseline fit(TRAIN) then select hyperparameters on VAL -> forecast TEST (touched
+once) -> score with the frozen metrics + CoP mask. Skill scores are computed on IDENTICAL masked
+frame sets (the mask depends only on target-frame force, not the model). Output is a tidy long
+table (CSV + parquet) stamped with the config hash; determinism is asserted (two runs identical).
+
+Standard prediction format for scoring EXTERNAL models (e.g. the GRU) against this harness:
+a dict {recording_idx: yhat} where yhat has shape (n_origins, H, 6) and n_origins/order match
+baselines.origins(len(Y), cfg) for that recording (target-time indexed, h = 1..H). See
+score_external() and the README section "Evaluating a new model".
 
     python -m src.tactile_forecast.eval_harness.evaluate
-    python -m src.tactile_forecast.eval_harness.evaluate --rebuild-splits
+    python -m src.tactile_forecast.eval_harness.evaluate --model-preds preds.npz --model-name gru
 """
 from __future__ import annotations
 
 import argparse
-import csv
 import os
 
 import numpy as np
+import pandas as pd
 
 from . import baselines as BL
 from . import masking, metrics
 from .config import load_config, Config
-from .dataset import Norm, force_thresholds, load_group
+from .dataset import Norm, force_thresholds, group_keys, load_group
 from .splits import load_splits
 
+MODELS = ["persistence", "seasonal", "ar"]
+CLASSES = {"persistence": BL.Persistence, "seasonal": BL.SeasonalNaive, "ar": BL.AR}
 
-def run_once(cfg: Config, splits: dict) -> dict:
-    """Fit/select/score every baseline on the frozen split. Returns per-baseline arrays."""
-    train = load_group(cfg, splits["train"])
-    val = load_group(cfg, splits["val"])
-    test = load_group(cfg, splits["test"])
+
+def _hand(channel: str) -> str:
+    return "L" if channel.endswith("_L") else "R"
+
+
+def _result(ytrue, yhat, mask) -> dict:
+    return {
+        "hz_mse": metrics.masked_horizon_mse(ytrue, yhat, mask),
+        "hz_mae": metrics.masked_horizon_mae(ytrue, yhat, mask),
+        "ch_mse": metrics.masked_channel_mse(ytrue, yhat, mask),
+        "ch_mae": metrics.masked_channel_mae(ytrue, yhat, mask),
+        "n": mask.reshape(-1, 6).sum(0).astype(int),
+    }
+
+
+def fit_and_forecast(cfg: Config, splits: dict):
+    """Fit/select every baseline; return (results, mask, extras). results[name] has masked
+    metric arrays; extras carries the seasonal periods."""
+    train, val, test = (load_group(cfg, splits[k]) for k in ("train", "val", "test"))
+    gtr = group_keys(cfg, splits["train"]); gva = group_keys(cfg, splits["val"])
+    gte = group_keys(cfg, splits["test"])
     norm = Norm.from_train(train)
     thr = force_thresholds(cfg, train)
 
-    # reference (persistence) first — needed for skill
-    results = {}
-    ref_mse = None
-    for cls in [BL.Persistence, BL.SeasonalNaive, BL.AR]:
-        bl = cls(cfg, norm)
-        bl.fit(train)
-        bl.select(val, cfg.horizon)
-        ytrue, yhat = BL.predict_series(bl, test, cfg)
-        mask = masking.valid_mask(cfg, ytrue.reshape(-1, 6), thr).reshape(ytrue.shape)
-        ch_mse = metrics.masked_channel_mse(ytrue, yhat, mask)
-        hz_mse = metrics.masked_horizon_mse(ytrue, yhat, mask)
-        ch_mae = metrics.masked_channel_mae(ytrue, yhat, mask)
-        results[bl.name] = {
-            "ch_mse": ch_mse, "hz_mse": hz_mse, "ch_mae": ch_mae,
-            "n_valid": mask.reshape(-1, 6).sum(0),
-            "hyper": getattr(bl, "order", getattr(bl, "period", None)),
-            "nrmse": metrics.normalized_rmse(ch_mse, norm.std),
-        }
-        if bl.name == "persistence":
-            ref_mse = {"ch": ch_mse, "hz": hz_mse}
-    for name, r in results.items():
-        r["ch_skill"] = metrics.skill(r["ch_mse"], ref_mse["ch"])
-        r["hz_skill"] = metrics.skill(r["hz_mse"], ref_mse["hz"])
-    return results
+    results, mask, extras = {}, None, {}
+    for name in MODELS:
+        bl = CLASSES[name](cfg, norm)
+        bl.fit(train, gtr)
+        bl.select(val, gva, cfg.horizon)
+        ytrue, yhat = BL.predict_series(bl, test, gte, cfg)
+        if mask is None:
+            mask = masking.valid_mask(cfg, ytrue.reshape(-1, 6), thr).reshape(ytrue.shape)
+        results[name] = _result(ytrue, yhat, mask)
+        if name == "seasonal":
+            extras["seasonal_periods"] = dict(bl.periods)
+            extras["ar_orders"] = None
+        if name == "ar":
+            extras["ar_orders"] = dict(bl.order)
+    return results, norm, extras
 
 
-def _flatten(results: dict) -> np.ndarray:
-    """Deterministic numeric fingerprint for the identical-runs assertion."""
-    keys = sorted(results)
-    return np.concatenate([results[k]["hz_mse"].ravel() for k in keys]
-                          + [results[k]["ch_mse"].ravel() for k in keys])
+def build_rows(cfg: Config, results: dict) -> list[dict]:
+    """Tidy long rows: [model, channel, hand, horizon_step, metric, value, n_frames, config_hash]."""
+    rows = []
+    H, chans = cfg.horizon, cfg.channels
+
+    def emit(model, ci, step, metric, value, n):
+        rows.append({"model": model, "channel": chans[ci], "hand": _hand(chans[ci]),
+                     "horizon_step": str(step), "metric": metric, "value": float(value),
+                     "n_frames": int(n), "config_hash": cfg.config_hash})
+
+    for m in MODELS:
+        R = results[m]
+        for ci in range(6):
+            n = R["n"][ci]
+            for h in range(H):
+                emit(m, ci, h + 1, "MSE", R["hz_mse"][h, ci], n)
+                emit(m, ci, h + 1, "MAE", R["hz_mae"][h, ci], n)
+                for b in MODELS:
+                    ss = metrics.skill(R["hz_mse"][h, ci], results[b]["hz_mse"][h, ci])
+                    emit(m, ci, h + 1, f"SS_vs_{b}", ss, n)
+            emit(m, ci, "all", "MSE", R["ch_mse"][ci], n)
+            emit(m, ci, "all", "MAE", R["ch_mae"][ci], n)
+            for b in MODELS:
+                ss = metrics.skill(R["ch_mse"][ci], results[b]["ch_mse"][ci])
+                emit(m, ci, "all", f"SS_vs_{b}", ss, n)
+    return rows
 
 
-def write_csv(cfg: Config, splits: dict, results: dict, out: str) -> None:
-    chans = cfg.channels
-    os.makedirs(os.path.dirname(out), exist_ok=True)
-    with open(out, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["config_hash", "baseline", "hyper", "channel", "horizon_step_s",
-                    "mse", "rmse", "mae", "skill_vs_persistence", "n_valid"])
-        for name in ["persistence", "seasonal", "ar"]:
-            r = results[name]
-            for ci, ch in enumerate(chans):
-                for h in range(cfg.horizon):
-                    mse = r["hz_mse"][h, ci]
-                    w.writerow([cfg.config_hash, name, r["hyper"], ch,
-                                round((h + 1) / cfg.fps, 3), f"{mse:.6g}",
-                                f"{np.sqrt(mse):.6g}",
-                                f"{r['ch_mae'][ci]:.6g}",
-                                f"{r['hz_skill'][h, ci]:.4f}", int(r["n_valid"][ci])])
+def score_external(cfg: Config, splits: dict, name: str, preds: dict[int, np.ndarray],
+                   ref_results: dict, norm: Norm) -> dict:
+    """Score an external model's predictions against the frozen baselines. `preds[idx]` is
+    (n_origins, H, 6) aligned to baselines.origins(len(Y), cfg). Returns a results-style dict and
+    appends rows via build_rows when merged into `ref_results`."""
+    test = load_group(cfg, splits["test"])
+    thr = force_thresholds(cfg, load_group(cfg, splits["train"]))
+    yts, yhs = [], []
+    for i, Y in sorted(test.items()):
+        ors = BL.origins(len(Y), cfg)
+        if i not in preds or preds[i].shape[0] != len(ors):
+            raise ValueError(f"preds[{i}] must have shape ({len(ors)}, {cfg.horizon}, 6)")
+        for j, t in enumerate(ors):
+            yts.append(Y[t + 1:t + 1 + cfg.horizon]); yhs.append(preds[i][j])
+    ytrue, yhat = np.stack(yts), np.stack(yhs)
+    mask = masking.valid_mask(cfg, ytrue.reshape(-1, 6), thr).reshape(ytrue.shape)
+    return _result(ytrue, yhat, mask)
+
+
+def write_table(rows: list[dict], out_csv: str) -> pd.DataFrame:
+    df = pd.DataFrame(rows)
+    os.makedirs(os.path.dirname(out_csv), exist_ok=True)
+    df.to_csv(out_csv, index=False)
+    df.to_parquet(os.path.splitext(out_csv)[0] + ".parquet", index=False)
+    return df
+
+
+def _fingerprint(results: dict) -> np.ndarray:
+    return np.concatenate([results[m]["hz_mse"].ravel() for m in MODELS]
+                          + [results[m]["ch_mse"].ravel() for m in MODELS])
 
 
 def main():
@@ -89,29 +137,52 @@ def main():
     ap.add_argument("--config", default=None)
     ap.add_argument("--rebuild-splits", action="store_true")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--model-preds", default=None, help=".npz of {idx: (n_origins,H,6)} to score")
+    ap.add_argument("--model-name", default="model")
     args = ap.parse_args()
     cfg = load_config(args.config) if args.config else load_config()
     splits = load_splits(cfg, rebuild=args.rebuild_splits)
     print(f"config_hash={cfg.config_hash}  fps={cfg.fps:.0f}  horizon={cfg.horizon} steps  "
-          f"split n={splits['n']} (train {len(splits['train'])}, val {len(splits['val'])}, "
-          f"test {len(splits['test'])})")
+          f"fit_scope={cfg.fit_scope}  split(train {len(splits['train'])}/val {len(splits['val'])}"
+          f"/test {len(splits['test'])})")
 
-    results = run_once(cfg, splits)
-    # determinism: identical second run
-    fp1 = _flatten(results)
-    fp2 = _flatten(run_once(cfg, splits))
-    assert np.array_equal(fp1, fp2), "NON-DETERMINISTIC: two runs differ"
+    results, norm, extras = fit_and_forecast(cfg, splits)
+    assert np.array_equal(_fingerprint(results), _fingerprint(fit_and_forecast(cfg, splits)[0])), \
+        "NON-DETERMINISTIC: two runs differ"
     print("determinism check: PASS (two runs identical)")
 
+    print("\nseasonal periods (frames) per group:")
+    for g, T in sorted(extras["seasonal_periods"].items()):
+        print(f"  {g:20} T={T}" + ("  (fallback->persistence)" if not T else f"  ({T/cfg.fps:.2f}s)"))
+    print("AR order per group:", {g: p for g, p in sorted(extras["ar_orders"].items())})
+
+    if args.model_preds:
+        preds = {int(k): v for k, v in np.load(args.model_preds).items()}
+        results[args.model_name] = score_external(cfg, splits, args.model_name, preds, results, norm)
+        MODELS.append(args.model_name)
+
+    rows = build_rows(cfg, results)
     out = args.out or cfg.abspath("out_csv")
-    write_csv(cfg, splits, results, out)
-    # console summary
-    print(f"\n{'baseline':12}{'hyper':>7}{'nRMSE':>9}   mean skill vs persistence (per channel)")
-    for name in ["persistence", "seasonal", "ar"]:
-        r = results[name]
-        sk = "  ".join(f"{c}:{s:+.2f}" for c, s in zip(cfg.channels, r["ch_skill"]))
-        print(f"{name:12}{str(r['hyper']):>7}{r['nrmse']:>9.3f}   {sk}")
-    print(f"\n[done] {out}")
+    df = write_table(rows, out)
+
+    # sidecar: estimated fit parameters per group (seasonal period + AR order), for inspection
+    fit_rows = [{"group": g, "seasonal_period_frames": extras["seasonal_periods"].get(g),
+                 "seasonal_period_s": (None if not extras["seasonal_periods"].get(g)
+                                       else round(extras["seasonal_periods"][g] / cfg.fps, 3)),
+                 "ar_order": extras["ar_orders"].get(g), "config_hash": cfg.config_hash}
+                for g in sorted(extras["ar_orders"])]
+    pd.DataFrame(fit_rows).to_csv(os.path.splitext(out)[0] + "_fitparams.csv", index=False)
+
+    # console summary: full-horizon skill vs persistence (computed straight from results)
+    print(f"\n{'model':12}{'nRMSE':>8}   full-horizon skill vs persistence (per channel)")
+    ref = results["persistence"]["ch_mse"]
+    for m in MODELS:
+        r = results[m]
+        nrmse = metrics.normalized_rmse(r["ch_mse"], norm.std)
+        ss = metrics.skill(r["ch_mse"], ref)
+        sk = "  ".join(f"{c[:6]}:{v:+.2f}" for c, v in zip(cfg.channels, ss))
+        print(f"{m:12}{nrmse:>8.3f}   {sk}")
+    print(f"\n[done] {out}  (+ .parquet)  rows={len(df)}")
 
 
 if __name__ == "__main__":

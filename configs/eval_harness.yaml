@@ -22,9 +22,14 @@ mask:
   percentile: 5
 
 baselines:
-  ar_orders: [1, 2, 4, 8, 16]      # AR order candidates; selected on VAL
-  seasonal_period_min: 3           # frames (0.3 s) — seasonal period search range
-  seasonal_period_max: 40          # frames (4.0 s); selected on VAL
+  # Fit scope for seasonal-period estimation and AR fitting: "group" (per activity x object,
+  # the default) or "global" (one fit over all TRAIN). Subject-level is unavailable (the manifest
+  # has no subject field); see SESSION_LOG Step 0.
+  fit_scope: group
+  ar_orders: [2, 5, 10, 15, 20, 30]   # AR order candidates; order selected on VAL
+  seasonal_period_min_s: 0.3          # plausible motion-cycle range (seconds); period estimated
+  seasonal_period_max_s: 3.0          # from the TRAIN autocorrelation dominant peak in this range
+  seasonal_min_autocorr: 0.1          # peak below this -> no clear cycle -> fall back to persistence
 
 split:
   # Fresh 3-way, by RECORDING, stratified by (action, object). Frozen to split_file.
@@ -41,6 +46,6 @@ eval:
 paths:
   states_root: data/actionsense_states
   split_file: data/actionsense_states/splits.json
-  out_csv: docs/harness_baselines.csv
+  out_csv: docs/harness_baselines.csv      # tidy long table; a .parquet twin is written alongside
 
 actions: [slice, peel]

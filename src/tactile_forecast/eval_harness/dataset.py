@@ -11,15 +11,33 @@ to VAL/TEST. AR fitting uses the normalized signal; metrics are reported in raw 
 """
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 
 import numpy as np
 
 from .config import Config
+from .splits import parse_label
 
 HANDS = 2
 MOMENTS_PER_HAND = 3          # F, CoPx, CoPy (drop the shear moments sxx,syy,sxy)
+
+
+def group_keys(cfg: Config, idxs: list[int]) -> dict[int, str]:
+    """Map each recording idx -> its fit group. 'group' scope => 'action-object'
+    (e.g. 'slice-cucumber'); 'global' scope => 'ALL'. Subject is unavailable (no manifest
+    field), so activity x object is the finest grouping we can form (see SESSION_LOG Step 0)."""
+    if cfg.fit_scope == "global":
+        return {i: "ALL" for i in idxs}
+    root = cfg.abspath("states_root")
+    lab = {}
+    with open(os.path.join(root, "manifest.jsonl")) as f:
+        for line in f:
+            r = json.loads(line)
+            lab[r["idx"]] = r["label"]
+    a_o = {i: parse_label(lab[i]) for i in idxs}
+    return {i: f"{a}-{o}" for i, (a, o) in a_o.items()}
 
 
 def load_target(cfg: Config, idx: int) -> np.ndarray:

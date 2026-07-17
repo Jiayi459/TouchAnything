@@ -36,6 +36,12 @@ def masked_channel_mae(ytrue: np.ndarray, yhat: np.ndarray, mask: np.ndarray) ->
     return num / np.maximum(den, 1.0)
 
 
+def masked_horizon_mae(ytrue: np.ndarray, yhat: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """(N,H,6) -> (H,6): MAE per (horizon step, channel)."""
+    e = np.abs(yhat - ytrue)
+    return (e * mask).sum(0) / np.maximum(mask.sum(0), 1.0)
+
+
 def skill(mse_model: np.ndarray, mse_ref: np.ndarray) -> np.ndarray:
     """1 - MSE_model / MSE_ref, elementwise (guarded)."""
     return 1.0 - mse_model / (mse_ref + EPS)

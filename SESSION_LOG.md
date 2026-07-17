@@ -1408,3 +1408,36 @@ OPEN QUESTIONS (blocking; awaiting user):
   Q1 grouping for seasonal-T / AR-fit: activity x object (now) vs re-stream for subject vs global?
   Q2 non-causal baseline_correct: accept DC offset as-is vs make causal (needs re-stream)?
   Q3 deps: pip install statsmodels + pyarrow, or numpy AR + CSV-only?
+
+### IMPLEMENTATION (2026-07-16) — refined harness delivered (statsmodels AR, per-group, tidy output)
+
+Decisions: grouping = activity x object; baseline_correct accepted as-is (non-causal DC, documented);
+installed statsmodels 0.14.6 + pyarrow 25. NO GRU retrain, NO re-stream.
+
+Reworked eval_harness/ (reused loaders/splits/masking; changed baselines + output):
+- config: fit_scope (group|global), ar_orders {2,5,10,15,20,30}, seasonal range in SECONDS (0.3-3s),
+  seasonal_min_autocorr floor. dataset.group_keys -> 'action-object' (or 'ALL' global).
+- baselines now GROUP-aware (fit(train,groups)/select(val,groups,H)/predict(hist,H,group)).
+  * seasonal: period per group from TRAIN autocorrelation FUNDAMENTAL peak (smallest-lag local max
+    within 95% of tallest, >= floor); no peak -> fallback persistence + warning; T stored.
+  * ar: statsmodels AutoReg (trend='c', numpy OLS fallback) per group per channel, order selected
+    per group on VAL by iterated H-step nMSE; recursive causal multi-step forecast.
+- metrics: added masked_horizon_mae. evaluate: skill vs persistence AND seasonal AND ar on identical
+  masked frames; tidy LONG table [model,channel,hand,horizon_step,metric,value,n_frames,config_hash]
+  -> docs/harness_baselines.csv + .parquet (990 rows); sidecar _fitparams.csv (seasonal T + AR order
+  per group). External-model scoring: --model-preds preds.npz (standard target-time-indexed format).
+  Determinism asserted (two runs identical).
+- scripts/plot_harness.py (plots only): docs/harness_skill_bars.png + harness_skill_curves.png.
+- tests/test_harness.py: 7 pytest (added seasonal-fallback; group-aware). ALL PASS.
+- src/tactile_forecast/eval_harness/README.md: how to score any future model.
+
+RESULTS (TEST, config_hash b0194860): persistence nRMSE 0.517 (ref); ar nRMSE 0.467, skill vs
+persistence +0.14..+0.25 (right-hand CoP-x best +0.25), AR order 20-30 per group; SEASONAL fell
+back to persistence for ALL 5 groups (skill 0). Masking active: CoP n_frames 46647-47205 vs force
+49670 (~2.5-3k low-force CoP frames removed).
+
+FINDING / OPEN QUESTION: seasonal-naive is inert because RAW aggregate force/CoP has NO
+autocorrelation peak in 0.3-3 s under its slow trend (autocorr monotonically decays -> no local
+max). Options to make seasonal engage: estimate the period on a CAUSAL detrended signal (first
+difference or causal high-pass; TRAIN-only, still causal per constraint 1). NOT added silently ->
+awaiting user decision. Deliverables 1-5 complete; no retrain.

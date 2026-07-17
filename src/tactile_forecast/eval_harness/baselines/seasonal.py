@@ -1,17 +1,42 @@
-"""Seasonal-naive baseline: y_hat[t+h] = y at the same phase, one or more whole periods
-back so the referenced sample is always observed (<= t).
+"""Seasonal-naive baseline: y_hat[t+h] = y at the same phase, whole periods back:
 
-    idx = (t + h) - ceil(h / m) * m      (guaranteed <= t, so strictly causal)
+    idx = (t + h) - ceil(h / T) * T          (always <= t  =>  strictly causal)
 
-with period m (in frames). CANDIDATE periods come from the config range and are ranked on
-TRAIN by autocorrelation strength (estimation on TRAIN only); the FINAL period is chosen on
-VAL by normalized H-step MSE (selection on VAL only). TEST is never consulted here.
+The period T is estimated PER GROUP (activity x object) from the dominant peak of the TRAIN
+autocorrelation function, searched in a plausible motion-cycle range (config, seconds). If no
+clear peak exists for a group (no local maximum, or peak autocorrelation below
+`seasonal_min_autocorr`), that group FALLS BACK to persistence and a warning is logged. The
+estimated T per group is stored in `self.periods` for the results table.
+
+Estimation uses TRAIN only (constraint 2). Autocorrelation is computed per recording and
+averaged (no cross-recording concatenation -> no boundary artifacts).
 """
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 
-from .base import Baseline, predict_series
+from .base import Baseline, by_group
+
+
+def _mean_autocorr(recs: list[np.ndarray], norm, max_lag: int) -> np.ndarray:
+    """Length-(max_lag+1) autocorrelation, averaged over recordings & channels (lag 0..max_lag)."""
+    acc = np.zeros(max_lag + 1)
+    wsum = 0.0
+    for Y in recs:
+        z = norm.z(Y)
+        z = z - z.mean(0)
+        var = (z * z).mean(0) + 1e-12          # per channel
+        n = len(z)
+        if n <= max_lag + 1:
+            continue
+        w = n
+        for m in range(max_lag + 1):
+            ac = (z[m:] * z[:n - m]).mean(0) / var    # per-channel autocorr at lag m
+            acc[m] += w * ac.mean()
+        wsum += w
+    return acc / max(wsum, 1e-9)
 
 
 class SeasonalNaive(Baseline):
@@ -19,45 +44,33 @@ class SeasonalNaive(Baseline):
 
     def __init__(self, cfg, norm):
         super().__init__(cfg, norm)
-        pmin = cfg.raw["baselines"]["seasonal_period_min"]
-        pmax = cfg.raw["baselines"]["seasonal_period_max"]
-        self.candidates = list(range(pmin, pmax + 1))
-        self.period = self.candidates[0]
+        self.pmin, self.pmax = cfg.seasonal_range
+        self.min_ac = cfg.raw["baselines"]["seasonal_min_autocorr"]
+        self.periods: dict[str, int | None] = {}     # group -> period (None = fallback)
 
-    # -- estimation on TRAIN: rank candidate periods by mean causal autocorrelation --
-    def fit(self, train: dict[int, np.ndarray]) -> None:
-        z = np.concatenate([self.norm.z(Y) for Y in train.values()], axis=0)  # (sumT,6)
-        z = z - z.mean(0)
-        var = (z * z).mean(0) + 1e-12
-        score = {}
-        for m in self.candidates:
-            if m >= len(z):
+    def fit(self, train: dict[int, np.ndarray], groups: dict[int, str]) -> None:
+        for g, recs in by_group(train, groups).items():
+            ac = _mean_autocorr(list(recs.values()), self.norm, self.pmax + 1)
+            # local maxima within [pmin, pmax] above the autocorr floor
+            peaks = [(m, ac[m]) for m in range(self.pmin, self.pmax + 1)
+                     if ac[m] > ac[m - 1] and ac[m] >= ac[m + 1] and ac[m] >= self.min_ac]
+            if not peaks:
+                warnings.warn(f"[seasonal] group '{g}': no clear cycle "
+                              f"(no autocorr peak >= {self.min_ac} in range); using persistence.")
+                self.periods[g] = None
                 continue
-            ac = (z[m:] * z[:-m]).mean(0) / var        # per-channel autocorr at lag m
-            score[m] = float(ac.mean())                # average across channels
-        # keep candidates ordered by TRAIN autocorr (best first); selection still on VAL
-        self.candidates = sorted(score, key=lambda m: -score[m]) or self.candidates
-        self.period = self.candidates[0]
+            # "dominant" = the FUNDAMENTAL: smallest-lag peak within 95% of the tallest peak
+            vmax = max(v for _, v in peaks)
+            self.periods[g] = min(m for m, v in peaks if v >= 0.95 * vmax)
 
-    # -- selection on VAL: pick the period with lowest normalized H-step MSE --
-    def select(self, val: dict[int, np.ndarray], H: int) -> None:
-        best, best_err = self.period, np.inf
-        for m in self.candidates:
-            self.period = m
-            yt, yh = predict_series(self, val, self.cfg)
-            if len(yt) == 0:
-                continue
-            err = float((((yh - yt) / self.norm.std) ** 2).mean())   # normalized MSE
-            if err < best_err:
-                best, best_err = m, err
-        self.period = best
-
-    def predict(self, hist: np.ndarray, H: int) -> np.ndarray:
+    def predict(self, hist: np.ndarray, H: int, group: str) -> np.ndarray:
+        m = self.periods.get(group)
+        if not m:                                    # fallback -> persistence
+            return np.repeat(hist[-1:], H, axis=0)
         t = len(hist) - 1
-        m = self.period
         out = np.empty((H, 6))
         for h in range(1, H + 1):
-            k = -(-h // m)                       # ceil(h/m)
+            k = -(-h // m)                            # ceil(h/m)
             idx = (t + h) - k * m
-            out[h - 1] = hist[idx] if idx >= 0 else hist[-1]   # causal: idx <= t always
+            out[h - 1] = hist[idx] if idx >= 0 else hist[-1]     # idx <= t always (causal)
         return out

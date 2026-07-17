@@ -49,6 +49,17 @@ class Config:
     def channels(self) -> list[str]:
         return list(self.raw["target"]["channels"])
 
+    @property
+    def fit_scope(self) -> str:
+        return self.raw["baselines"]["fit_scope"]
+
+    @property
+    def seasonal_range(self) -> tuple[int, int]:
+        """Seasonal period search range in FRAMES (from the config's seconds range)."""
+        b = self.raw["baselines"]
+        return (max(2, int(round(b["seasonal_period_min_s"] * self.fps))),
+                int(round(b["seasonal_period_max_s"] * self.fps)))
+
     def abspath(self, key: str) -> str:
         p = self.raw["paths"][key]
         return p if os.path.isabs(p) else os.path.join(REPO_ROOT, p)

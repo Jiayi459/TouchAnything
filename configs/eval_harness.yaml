@@ -1,0 +1,46 @@
+# Frozen evaluation harness for tactile forecasting (aggregate force + CoP).
+# This file is the SINGLE source of truth for horizon / masking / splits / baseline
+# hyperparameter search. evaluate.py records sha256(this file) in the results table.
+# See src/tactile_forecast/eval_harness/ (metrics, masking, splits, baselines, evaluate).
+
+target:
+  # 6-dim RAW target, both hands: [F_L, CoPx_L, CoPy_L, F_R, CoPx_R, CoPy_R].
+  # RAW = the physical moments straight from state_N.npy (NO high-pass; NO warmup cut).
+  channels: [F_L, CoPx_L, CoPy_L, F_R, CoPx_R, CoPy_R]
+  force_idx: [0, 3]        # total-force channels (never masked)
+  cop_idx:   [1, 2, 4, 5]  # CoP channels (masked at low force)
+
+rate:
+  fps_raw: 30.0            # manifest-stamped raw rate
+  downsample: 3            # -> 10 Hz effective (matches the probGRU pipeline)
+  horizon_s: 1.0           # forecast look-ahead. At 10 Hz => 10 steps of 100 ms.
+
+mask:
+  # CoP is undefined at low contact force. A CoP TARGET frame is excluded from CoP
+  # metrics iff that hand's RAW total force < the TRAIN per-hand `percentile`th pct.
+  # Force channels are NEVER masked. Thresholds are fit on TRAIN only.
+  percentile: 5
+
+baselines:
+  ar_orders: [1, 2, 4, 8, 16]      # AR order candidates; selected on VAL
+  seasonal_period_min: 3           # frames (0.3 s) — seasonal period search range
+  seasonal_period_max: 40          # frames (4.0 s); selected on VAL
+
+split:
+  # Fresh 3-way, by RECORDING, stratified by (action, object). Frozen to split_file.
+  train: 0.6
+  val: 0.2
+  test: 0.2
+  seed: 0
+
+eval:
+  stride: 1                # rolling-origin stride (frames) within each recording
+  min_history: 40          # frames of past required before the first forecast origin
+  seed: 0
+
+paths:
+  states_root: data/actionsense_states
+  split_file: data/actionsense_states/splits.json
+  out_csv: docs/harness_baselines.csv
+
+actions: [slice, peel]

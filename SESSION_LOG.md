@@ -1314,3 +1314,57 @@ train-derived. Constraints 1 & 3 already satisfied upstream.
   install pytest + AR via numpy (no statsmodels) — OK?
 - Q5 (minor) MASK KEY: mask CoP by RAW total force even when the target is the fast component
   (recommended — masking reflects physical contact, not the zero-mean fast signal). OK?
+
+### RESOLUTION + IMPLEMENTATION (2026-07-16) — frozen eval harness BUILT
+
+User answers to the 4 open questions: Q1 target = 6-dim RAW both-hands; Q2 rate = 10 Hz / 10
+steps; Q3 split = fresh 3-way 60/20/20 by recording, stratified by (action,object); Q4 = new
+`eval_harness/` package + pip install pytest + AR via numpy (no statsmodels). ("What are steps"
+and "how is the current split" were answered in-chat: a step = one predicted sample; 1 s horizon
+= 10 samples at 10 Hz; old split was 2-way 75/25 seed=1, no val.)
+
+BUILT (all imported from ONE place; harness is frozen):
+- configs/eval_harness.yaml            single source of truth; sha256 stamped into results.
+- src/tactile_forecast/eval_harness/
+    config.py     Config + config_hash (sha256 of the yaml bytes).
+    splits.py     stratified 60/20/20 by recording -> data/actionsense_states/splits.json
+                  (COMMITTED; n=75 -> train 45 / val 15 / test 15). By recording => both hands
+                  same split. Only partitions indices, never reads signals -> cannot leak.
+    dataset.py    RAW 6-dim target [F_L,CoPx_L,CoPy_L,F_R,CoPx_R,CoPy_R] from state_N.npy moments
+                  0..2 of each hand, downsampled x3 -> 10 Hz. Global TRAIN z-score (Norm). Per-hand
+                  force thresholds = TRAIN 5th pct.
+    masking.py    ONE CoP mask: a CoP target frame is dropped iff that hand's RAW force < TRAIN
+                  threshold; force channels never masked. Keys off the TARGET-frame force.
+    metrics.py    masked per-channel / per-horizon MSE, MAE, skill=1-MSE/MSE_persistence, nRMSE.
+    baselines/    base.Baseline (predict(hist,H) reads only hist=past<=t) + predict_series
+                  (rolling-origin, structurally causal). persistence, seasonal (causal
+                  same-phase-k-periods-back; period ranked on TRAIN autocorr, selected on VAL),
+                  ar (per-channel OLS AR(p) on normalized signal, fit TRAIN, order selected on
+                  VAL, recursive causal forecast; numpy lstsq, no statsmodels).
+    evaluate.py   fit(TRAIN)->select(VAL)->score(TEST once); determinism assert (two runs
+                  identical); writes docs/harness_baselines.csv with config_hash.
+- tests/test_harness.py (pytest, 6 tests, ALL PASS): seasonal exact on sine; seasonal selects
+  true period; persistence MSE matches analytic 1-cos(2*pi*h/T); AR(2) coeff recovery + beats
+  persistence; CoP masking excludes low-force frames from CoP but keeps force; causality (future
+  corruption never changes a forecast issued at t) + non-vacuous past-dependence sanity.
+
+RESULTS (docs/harness_baselines.csv, config_hash ccb0d9c5, TEST split, mean skill vs persistence):
+  persistence  nRMSE 0.517  (reference, skill 0)
+  seasonal(3)  nRMSE 0.556  skill -0.13..-0.18  -> WORSE than persistence: raw aggregate force/CoP
+               is NOT cleanly periodic at a single global period; copying a period back loses to
+               copying the last value. (Seasonal picked the min period 3, near-persistence.)
+  ar(16)       nRMSE 0.470  skill +0.12..+0.23  -> BEATS persistence; right-hand CoP-x highest
+               (+0.23), echoing the probGRU finding that right-hand CoP is most predictable.
+Constraints honored: causal-only (no filtfilt; baselines structurally causal + tested); no
+leakage (fit TRAIN / select VAL / TEST once); global TRAIN normalization; CoP masking; target-time
+indexing. pytest + the harness both green. Deterministic (assert passes).
+
+CONTRADICTIONS SURFACED (did not silently work around): (A) spec 15 Hz/15 steps vs repo 10 Hz/10
+steps; (B) spec 6-dim raw both-hands vs probGRU 3-dim fast one-hand; (C) existing pixel
+eval.py/baselines.py belong to a DIFFERENT stack (left untouched); (D) pytest+statsmodels missing;
+(E) only a 2-way split existed. All resolved with the user before coding.
+
+NOTE: this harness scores the RAW 6-dim target. The current probGRU predicts the 3-dim FAST 1-hand
+target, so it is NOT directly scorable here yet (by design: task said don't touch it). To later
+plug the probGRU in, it must be re-scoped to predict raw 6-dim both-hands, then call the same
+metrics/masking/splits.

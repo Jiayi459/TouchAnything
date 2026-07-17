@@ -69,6 +69,32 @@ def main():
     fig.tight_layout(rect=[0, 0, 1, 0.97]); fig.savefig("docs/harness_skill_curves.png", dpi=120)
     print("[done] docs/harness_skill_curves.png")
 
+    # ---- (3) MSE and MAE error curves, one subplot per channel, one line per baseline ----
+    all_models = [m for m in ["persistence", "seasonal", "ar"] if m in df.model.unique()]
+    styles = {"persistence": dict(ls="-", lw=2.0), "seasonal": dict(ls="--", lw=2.4, alpha=.7),
+              "ar": dict(ls="-", lw=2.0)}
+    units = {"F_L": "sensor units^2", "F_R": "sensor units^2"}   # CoP -> grid^2
+    for metric in ["MSE", "MAE"]:
+        fig, axes = plt.subplots(2, 3, figsize=(14, 7), sharex=True)
+        for ci, c in enumerate(channels):
+            ax = axes[ci // 3, ci % 3]
+            for m in all_models:
+                sub = df[(df.model == m) & (df.channel == c) & (df.metric == metric)
+                         & (df.horizon_step != "all")]
+                sub = sub.assign(h=sub.horizon_step.astype(int)).sort_values("h")
+                ax.plot(sub.h / fps, sub.value, marker="o", ms=3, label=m, **styles[m])
+            u = units.get(c, "grid^2") if metric == "MSE" else (units.get(c, "grid").replace("^2", ""))
+            ax.set_title(c); ax.grid(alpha=.3); ax.ticklabel_format(axis="y", scilimits=(-2, 3))
+            if ci % 3 == 0:
+                ax.set_ylabel(f"{metric} ({u})")
+            if ci // 3 == 1:
+                ax.set_xlabel("lead time (s)")
+        axes[0, 0].legend(fontsize=8, title="(seasonal == persistence)")
+        fig.suptitle(f"{metric} vs lead time, per channel (3 baselines)", fontsize=13)
+        fig.tight_layout(rect=[0, 0, 1, 0.97])
+        out = f"docs/harness_{metric.lower()}_curves.png"
+        fig.savefig(out, dpi=120); print(f"[done] {out}")
+
 
 if __name__ == "__main__":
     main()

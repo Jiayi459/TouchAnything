@@ -1368,3 +1368,43 @@ NOTE: this harness scores the RAW 6-dim target. The current probGRU predicts the
 target, so it is NOT directly scorable here yet (by design: task said don't touch it). To later
 plug the probGRU in, it must be re-scoped to predict raw 6-dim both-hands, then call the same
 metrics/masking/splits.
+
+### Step 0 (2026-07-16) — exploration for the REFINED harness spec + contradictions
+
+Explored existing preprocessing (do-not-duplicate; reuse loaders):
+(a) SEGMENTATION: probe_actionsense.py cuts per-subject ActionSense HDF5 into per-activity clips
+    by Start/Stop markers, resamples each to 30 Hz, -> PS.clip_states -> state_idx.npy + manifest.
+    Files processed S00..S05 in order; idx runs across subjects but SUBJECT IS NOT RECORDED.
+(b) SPLIT: old split_train_test (2-way 75/25 seed=1, no val); NEW frozen eval_harness/splits.py
+    -> splits.json (3-way 60/20/20 by recording, stratified action x object). Treat as FROZEN.
+(c) FILTERING: raw 6-dim target has NO temporal filter, BUT physical_state.baseline_correct
+    subtracts a WHOLE-CLIP 5th-pct DC offset per taxel (physical_state.py:68, percentile over the
+    full time axis incl. future) => NON-CAUSAL upstream offset. Reported per instructions.
+(d) NORMALIZATION: upstream baseline_correct (DC); harness Norm = global per-channel z-score TRAIN
+    only. No per-window normalization.
+
+CONTRADICTIONS / BLOCKERS (surfaced, not worked around):
+  1. "per subject x activity" impossible as written: manifest has activity, NO subject. Subject only
+     recoverable by re-streaming 88GB HDF5 on CRC (upstream change + data regen). Available now:
+     activity x object (5 groups). 
+  2. baseline_correct NON-CAUSAL (whole-clip percentile). Making it causal needs re-streaming.
+  3. Deps: statsmodels MISSING (spec wants AutoReg; escape clause allows numpy), pyarrow/fastparquet
+     MISSING (parquet), pandas OK.
+
+RETRAIN? No GRU retraining in any case (harness never touches it). Baseline fits are cheap/local.
+ONLY heavy recompute = RE-STREAM states on CRC, needed ONLY if we choose subject-grouping (#1) or
+causal baseline-correction (#2). Otherwise everything runs locally in seconds.
+
+PROPOSED PLAN (deltas on existing eval_harness/, reuse loaders/splits/masking/metrics):
+  seasonal -> per-group period from TRAIN autocorr peak (0.3-3 s config range), fallback persistence
+    + warning, store T in results. AR -> statsmodels AutoReg (numpy fallback), orders {2,5,10,15,20,30},
+    order on VAL, fit-scope config (default = chosen grouping). metrics -> skill vs persistence AND
+    seasonal AND ar on identical masked frames. output -> tidy long CSV + parquet
+    [model,channel,hand,horizon_step,metric,value,n_frames,config_hash]. plots -> per-channel
+    full-horizon skill bars + per-step skill curves. evaluate -> score external model predictions in a
+    standard indexed format. README usage section.
+
+OPEN QUESTIONS (blocking; awaiting user):
+  Q1 grouping for seasonal-T / AR-fit: activity x object (now) vs re-stream for subject vs global?
+  Q2 non-causal baseline_correct: accept DC offset as-is vs make causal (needs re-stream)?
+  Q3 deps: pip install statsmodels + pyarrow, or numpy AR + CSV-only?

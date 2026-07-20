@@ -1,4 +1,4 @@
-"""Plot the v2 action-dynamics forecast (thin CLI over src/tactile_forecast/action_dynamics.py).
+"""Plot the v2 action-dynamics forecast (thin CLI over src/actionsense/action_dynamics.py).
 
 This script ONLY plots — all model/training/forecast logic lives in the library. Two modes:
   * default: sweep past-context lengths (1/2/3/5/10 s), training one model per length via the
@@ -18,7 +18,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src.tactile_forecast import action_dynamics as AD  # noqa: E402
+from src.actionsense import action_dynamics as AD  # noqa: E402
 
 
 def pick_viz(data, subs, viz_action):

@@ -15,10 +15,10 @@ import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.tactile_forecast.eval_harness.config import Config
-from src.tactile_forecast.eval_harness.dataset import Norm
-from src.tactile_forecast.eval_harness import metrics, masking
-from src.tactile_forecast.eval_harness.baselines import (
+from src.actionsense.eval_harness.config import Config
+from src.actionsense.eval_harness.dataset import Norm
+from src.actionsense.eval_harness import metrics, masking
+from src.actionsense.eval_harness.baselines import (
     Persistence, SeasonalNaive, AR, predict_series)
 
 G = {0: "g0"}          # single synthetic group

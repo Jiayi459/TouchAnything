@@ -15,7 +15,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src.tactile_forecast import state_forecast as SF  # noqa: E402
+from src.actionsense import state_forecast as SF  # noqa: E402
 
 
 def main():

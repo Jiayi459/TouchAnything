@@ -44,4 +44,4 @@ output is **not** z-scored (retains raw scale) and the fast target equals `raw â
 
 ---
 All six currently **PASS** after switching the filter to `sosfilt` and velocities to a causal
-backward difference (2026-07-08). See `src/tactile_forecast/action_dynamics.py`.
+backward difference (2026-07-08). See `src/actionsense/action_dynamics.py`.

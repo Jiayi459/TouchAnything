@@ -18,7 +18,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src.tactile_forecast import action_dynamics as AD  # noqa: E402
+from src.actionsense import action_dynamics as AD  # noqa: E402
 
 
 def cross_validate(data, n_act, t_in, t_out, folds, hidden, epochs, seed):

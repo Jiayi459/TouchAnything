@@ -26,7 +26,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.tactile_forecast.categories import categorize_phrase, TEMPORAL_PATTERN  # noqa: E402
 from src.tactile_forecast import predictability as P  # noqa: E402
-from src.tactile_forecast import physical_state as PS  # noqa: E402
+from src.actionsense import physical_state as PS  # noqa: E402
 
 TACTILE_KEYS = ("tactile-glove-left", "tactile-glove-right")
 BAD_RATINGS = ("Bad", "Maybe")

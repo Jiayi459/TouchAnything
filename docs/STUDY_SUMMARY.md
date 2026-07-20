@@ -58,7 +58,7 @@ cycle has force-reversal turning points a forecaster must anticipate; a ramp doe
 ## 6. Artifacts
 - Probes: `scripts/probe_egotouch.py`, `scripts/probe_opentouch.py`, `scripts/probe_actionsense.py`
   (+ `scripts/crc/stream_actionsense.sh` streaming driver).
-- Forecaster: library `src/tactile_forecast/action_dynamics.py` (model+train+forecast); CLIs
+- Forecaster: library `src/actionsense/action_dynamics.py` (model+train+forecast); CLIs
   `scripts/train_action_dynamics.py` (train->checkpoint) and `scripts/plot_action_forecast.py` (plot).
 - Shared metrics: `src/tactile_forecast/predictability.py`; taxonomy `src/tactile_forecast/categories.py`.
 - Result CSVs: `docs/predictability_{by_category_full,opentouch,actionsense}.csv`.

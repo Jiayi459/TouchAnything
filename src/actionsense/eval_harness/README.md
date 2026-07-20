@@ -25,7 +25,7 @@ and **deterministic** (the run asserts two passes are identical). Everything is 
 ## Run the baselines
 
 ```bash
-python -m src.tactile_forecast.eval_harness.evaluate      # -> docs/harness_baselines.csv (+ .parquet)
+python -m src.actionsense.eval_harness.evaluate      # -> docs/harness_baselines.csv (+ .parquet)
 python scripts/plot_harness.py                            # -> docs/harness_skill_{bars,curves}.png
 pytest tests/test_harness.py                              # synthetic-signal unit tests
 ```
@@ -48,7 +48,7 @@ import numpy as np
 np.savez("preds.npz", **{str(idx): yhat_idx for idx, yhat_idx in preds.items()})
 ```
 ```bash
-python -m src.tactile_forecast.eval_harness.evaluate --model-preds preds.npz --model-name gru
+python -m src.actionsense.eval_harness.evaluate --model-preds preds.npz --model-name gru
 ```
 
 This scores your model with the **same** mask, splits, and metrics, and reports its skill vs all

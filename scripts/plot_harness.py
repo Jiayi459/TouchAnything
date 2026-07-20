@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src.tactile_forecast.eval_harness.config import load_config  # noqa: E402
+from src.actionsense.eval_harness.config import load_config  # noqa: E402
 
 
 def main():

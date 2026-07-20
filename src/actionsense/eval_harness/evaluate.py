@@ -11,8 +11,8 @@ a dict {recording_idx: yhat} where yhat has shape (n_origins, H, 6) and n_origin
 baselines.origins(len(Y), cfg) for that recording (target-time indexed, h = 1..H). See
 score_external() and the README section "Evaluating a new model".
 
-    python -m src.tactile_forecast.eval_harness.evaluate
-    python -m src.tactile_forecast.eval_harness.evaluate --model-preds preds.npz --model-name gru
+    python -m src.actionsense.eval_harness.evaluate
+    python -m src.actionsense.eval_harness.evaluate --model-preds preds.npz --model-name gru
 """
 from __future__ import annotations
 

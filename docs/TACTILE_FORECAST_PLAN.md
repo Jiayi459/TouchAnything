@@ -159,7 +159,7 @@ ConvLSTM); dynamics = **GRU baseline then compare to a structured ramp/oscillato
 tactile-only.
 
 **State `s(t)`** (analytic, per hand) = raw pressure moments [F, x̄, ȳ, sxx, syy, sxy]
-(`src/tactile_forecast/physical_state.py`, validated on synthetic pour/slice), with derived
+(`src/actionsense/physical_state.py`, validated on synthetic pour/slice), with derived
 series area, orientation θ, eccentricity, CoP velocity (ẋ,ẏ), dF/dt, and phase φ (Hilbert of
 F(t)) computed at train time. Coordinates normalized to [-1,1] (sensor-size-agnostic).
 

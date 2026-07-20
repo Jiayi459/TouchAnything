@@ -1,7 +1,7 @@
 # Frozen evaluation harness for tactile forecasting (aggregate force + CoP).
 # This file is the SINGLE source of truth for horizon / masking / splits / baseline
 # hyperparameter search. evaluate.py records sha256(this file) in the results table.
-# See src/tactile_forecast/eval_harness/ (metrics, masking, splits, baselines, evaluate).
+# See src/actionsense/eval_harness/ (metrics, masking, splits, baselines, evaluate).
 
 target:
   # 6-dim RAW target, both hands: [F_L, CoPx_L, CoPy_L, F_R, CoPx_R, CoPy_R].

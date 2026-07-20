@@ -228,7 +228,7 @@ Implemented `src/tactile_pixel/`:
 - `baselines.py` — persistence + last-velocity.
 - `train.py` / `eval.py` — CLI: protocol (lto/loto), fold, scope (grasp/full), pretrain &
   `--pretrained` fine-tune; writes `best.pt`, `train_log.csv`, `test_metrics.csv`, `summary.json`.
-- `configs/tactile/{convgru,convlstm,simvp}.yaml`; `scripts/crc/smoke_test.py` (synthetic
+- `configs/tactile_pixel/{convgru,convlstm,simvp}.yaml`; `scripts/crc/smoke_test.py` (synthetic
   end-to-end check). All 11 modules byte-compile; torch path to be smoke-tested on CRC.
 
 Run recipe in `scripts/crc/README.md` (smoke → pretrain on full → fine-tune LTO/LOTO CV → eval).

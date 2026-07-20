@@ -187,11 +187,11 @@ taxonomy above, and a CRC job trains + Leave-Trajectory-Out CV within one catego
 
 ```bash
 # one category, one fold
-qsub -v CATEGORY=Cut,FOLD=0,CONFIG=configs/tactile/simvp.yaml scripts/crc/percategory_gpu.job
+qsub -v CATEGORY=Cut,FOLD=0,CONFIG=configs/tactile_pixel/simvp.yaml scripts/crc/percategory_gpu.job
 # sweep the informative categories x 5 folds
 CATS=("Cut" "Spray" "Wash/Clean" "Grasp/Hold/Lift" "Squeeze" "Press/Click" "Pick-up")
 for c in "${CATS[@]}"; do for f in 0 1 2 3 4; do
-  qsub -v CATEGORY="$c",FOLD=$f,CONFIG=configs/tactile/simvp.yaml scripts/crc/percategory_gpu.job
+  qsub -v CATEGORY="$c",FOLD=$f,CONFIG=configs/tactile_pixel/simvp.yaml scripts/crc/percategory_gpu.job
 done; done
 ```
 

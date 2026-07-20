@@ -66,7 +66,7 @@ export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
 
 # ========== Configuration parameters ==========
 CHECKPOINT="/data_all/intern10/tmp/TouchAnything-Dev/checkpoints/20260421_094954_dinov2_vitb14_tactile_prediction/best_model.pth"
-CONFIG="/data_all/intern10/TouchAnything/configs/touchanything_with_glove_aug_wilor.yaml"
+CONFIG="/data_all/intern10/TouchAnything/configs/touchanything/touchanything_with_glove_aug_wilor.yaml"
 OUTPUT_BASE="outputs/inference/5-12"
 
 # GPU configuration, command-line arguments take priority

@@ -4,14 +4,14 @@
 # `mkdir -p logs`. One qsub per (category, fold).
 #
 #   bash scripts/crc/run_percategory.sh
-#   CONFIG=configs/tactile/convgru.yaml bash scripts/crc/run_percategory.sh   # different model
+#   CONFIG=configs/tactile_pixel/convgru.yaml bash scripts/crc/run_percategory.sh   # different model
 #   FOLDS="0 1 2" CATS="Cut Spray" bash scripts/crc/run_percategory.sh        # subset
 #
 # Categories ranked most/least predictable by the training-free probe (docs/ACTION_CATEGORIES.md).
 # This sweep MEASURES the real skill-over-persistence to confirm or break that ranking.
 set -euo pipefail
 
-CONFIG="${CONFIG:-configs/tactile/simvp.yaml}"
+CONFIG="${CONFIG:-configs/tactile_pixel/simvp.yaml}"
 PROTOCOL="${PROTOCOL:-lto}"
 FOLDS="${FOLDS:-0 1 2 3 4}"
 # Informative spread: top-PI (periodic) ... bottom-PI (holds / make-break contact).

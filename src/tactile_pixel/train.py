@@ -3,15 +3,15 @@
 Examples
 --------
 # Leave-Trajectory-Out fold 0, ConvGRU, grasp subset:
-python -m src.tactile_pixel.train --config configs/tactile/convgru.yaml \
+python -m src.tactile_pixel.train --config configs/tactile_pixel/convgru.yaml \
     --protocol lto --fold 0 --scope grasp
 
 # Pretrain on ALL trajectories (no held-out test), save checkpoint:
-python -m src.tactile_pixel.train --config configs/tactile/convgru.yaml \
+python -m src.tactile_pixel.train --config configs/tactile_pixel/convgru.yaml \
     --scope full --pretrain --out runs/convgru_pretrain
 
 # Fine-tune from a pretrained checkpoint:
-python -m src.tactile_pixel.train --config configs/tactile/convgru.yaml \
+python -m src.tactile_pixel.train --config configs/tactile_pixel/convgru.yaml \
     --protocol lto --fold 0 --scope grasp --pretrained runs/convgru_pretrain/best.pt
 """
 from __future__ import annotations

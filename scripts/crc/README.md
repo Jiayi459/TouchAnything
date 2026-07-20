@@ -73,12 +73,12 @@ exit
 Edit your **netid** in `scripts/crc/train_gpu.job`, then `mkdir -p logs`.
 ```bash
 # (a) Pretrain on ALL trajectories (needs full EgoTouch npz), once per model:
-qsub -v CONFIG=configs/tactile/convgru.yaml,SCOPE=full scripts/crc/train_gpu.job
+qsub -v CONFIG=configs/tactile_pixel/convgru.yaml,SCOPE=full scripts/crc/train_gpu.job
 #   (or run interactively with --pretrain --out runs/convgru_pretrain)
 
 # (b) Fine-tune + Leave-Trajectory-Out CV (5 folds) on the 82 grasp clips:
 for f in 0 1 2 3 4; do
-  qsub -v CONFIG=configs/tactile/convgru.yaml,FOLD=$f,SCOPE=grasp,\
+  qsub -v CONFIG=configs/tactile_pixel/convgru.yaml,FOLD=$f,SCOPE=grasp,\
 PRETRAINED=runs/convgru_pretrain/best.pt scripts/crc/train_gpu.job
 done
 
@@ -122,7 +122,7 @@ qrsh -q gpu -l gpu_card=1     # then in the shell: conda activate tactile; pytho
 # --- (D) submit the sweep (9 categories x 5 folds = 45 SimVP jobs) ---
 mkdir -p logs
 bash scripts/crc/run_percategory.sh
-#   swap model:   CONFIG=configs/tactile/convgru.yaml bash scripts/crc/run_percategory.sh
+#   swap model:   CONFIG=configs/tactile_pixel/convgru.yaml bash scripts/crc/run_percategory.sh
 #   subset:       CATS="Cut Grasp/Hold/Lift Press/Click" FOLDS="0 1 2" bash scripts/crc/run_percategory.sh
 qstat -u $USER            # qw=queued, r=running ;  qdel JOBID to cancel
 

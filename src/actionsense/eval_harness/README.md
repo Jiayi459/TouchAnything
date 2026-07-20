@@ -20,7 +20,7 @@ them per model.
 
 All operations are **causal** (no `filtfilt`; a forecast issued at origin *t* reads only data ≤ *t*)
 and **deterministic** (the run asserts two passes are identical). Everything is controlled by
-`configs/eval_harness.yaml`; its sha256 is stamped into every result row.
+`configs/actionsense/eval_harness.yaml`; its sha256 is stamped into every result row.
 
 ## Run the baselines
 

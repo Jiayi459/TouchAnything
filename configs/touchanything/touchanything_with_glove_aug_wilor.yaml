@@ -75,8 +75,8 @@ data:
   split_file: "datasets/TouchAnything_hdf5_opensource_en/split.json"
 
   # Pressure sensor position mapping JSON
-  mapping_left: "configs/pressure_position_mapping_left.json"
-  mapping_right: "configs/pressure_position_mapping_right.json"
+  mapping_left: "configs/touchanything/pressure_position_mapping_left.json"
+  mapping_right: "configs/touchanything/pressure_position_mapping_right.json"
 
   train_split: 0.8
   val_split: 0.1

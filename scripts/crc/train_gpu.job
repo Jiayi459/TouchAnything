@@ -1,7 +1,7 @@
 #!/bin/bash
 # UGE GPU job for ND CRC. Submit from the repo root after `mkdir -p logs`:
 #   qsub scripts/crc/train_gpu.job
-# Pass variables, e.g.:  qsub -v FOLD=0,CONFIG=configs/tactile/convgru.yaml scripts/crc/train_gpu.job
+# Pass variables, e.g.:  qsub -v FOLD=0,CONFIG=configs/tactile_pixel/convgru.yaml scripts/crc/train_gpu.job
 # NOTE: no inline comments on #$ lines — UGE treats the rest of the line as the argument.
 #$ -M jhao3@nd.edu
 #$ -m abe
@@ -26,11 +26,11 @@ print("Device:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else
 PY
 
 # Training entrypoint. Pass vars via qsub -v, e.g.:
-#   qsub -v CONFIG=configs/tactile/convgru.yaml,FOLD=0,PRETRAINED=runs/convgru_pretrain/best.pt train_gpu.job
+#   qsub -v CONFIG=configs/tactile_pixel/convgru.yaml,FOLD=0,PRETRAINED=runs/convgru_pretrain/best.pt train_gpu.job
 PRETRAINED_ARG=""
 if [ -n "${PRETRAINED:-}" ]; then PRETRAINED_ARG="--pretrained ${PRETRAINED}"; fi
 python -m src.tactile_pixel.train \
-    --config "${CONFIG:-configs/tactile/convgru.yaml}" \
+    --config "${CONFIG:-configs/tactile_pixel/convgru.yaml}" \
     --protocol "${PROTOCOL:-lto}" \
     --fold "${FOLD:-0}" \
     --scope "${SCOPE:-grasp}" \

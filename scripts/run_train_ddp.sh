@@ -11,7 +11,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-CONFIG="${CONFIG:-$PROJECT_ROOT/configs/touchanything_with_glove_aug_wilor.yaml}"
+CONFIG="${CONFIG:-$PROJECT_ROOT/configs/touchanything/touchanything_with_glove_aug_wilor.yaml}"
 GPU_IDS="${GPU_IDS:-2,3,4,5,6,7}"
 
 usage() {

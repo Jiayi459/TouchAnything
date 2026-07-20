@@ -128,7 +128,7 @@ def _create_bend_sensor_mask(size=21, hand='both'):
     """
     Create a bend-sensor mask that marks finger-joint bend-sensor positions
     
-    Read exact joint positions directly from configs/hand_joint_positions.json
+    Read exact joint positions directly from configs/touchanything/hand_joint_positions.json
     
     Args:
         size: grid size, default 21

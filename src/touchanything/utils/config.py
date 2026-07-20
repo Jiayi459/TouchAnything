@@ -45,7 +45,7 @@ def load_config_with_base(config_path: str, base_config_path: str = None) -> Dic
     Example:
         config = load_config_with_base(
             'configs/hamer_pose_training_330_full.yaml',
-            'configs/base.yaml',
+            'configs/touchanything/base.yaml',
         )
     """
     if base_config_path is None:

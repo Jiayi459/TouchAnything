@@ -1,6 +1,6 @@
 """Config loading + hashing for the frozen harness.
 
-The YAML at configs/eval_harness.yaml is the SINGLE source of truth. `config_hash` is a
+The YAML at configs/actionsense/eval_harness.yaml is the SINGLE source of truth. `config_hash` is a
 sha256 over the exact file bytes; it is stamped into the results table so any row is
 traceable to the config that produced it. Changing the config changes the hash.
 """
@@ -14,7 +14,7 @@ from typing import Any
 import yaml
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-DEFAULT_CONFIG = os.path.join(REPO_ROOT, "configs", "eval_harness.yaml")
+DEFAULT_CONFIG = os.path.join(REPO_ROOT, "configs", "actionsense", "eval_harness.yaml")
 
 
 @dataclass(frozen=True)

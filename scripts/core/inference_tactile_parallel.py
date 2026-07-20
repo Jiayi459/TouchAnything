@@ -42,12 +42,12 @@ matplotlib.rcParams['font.sans-serif'] = ['Noto Sans SC', 'WenQuanYi Micro Hei',
                                            'AR PL UMing CN', 'DejaVu Sans']
 matplotlib.rcParams['axes.unicode_minus'] = False
 
-from src.models import build_model
-from src.utils import load_config_with_base
-from src.data import get_transforms
-from src.utils.vis_pressure import (fig_to_bgr, render_pressure_panel,
+from src.touchanything.models import build_model
+from src.touchanything.utils import load_config_with_base
+from src.touchanything.data import get_transforms
+from src.touchanything.utils.vis_pressure import (fig_to_bgr, render_pressure_panel,
                                     PRESS_W, PRESS_H, pred_to_21)
-from src.utils.metrics import compute_tactile_metrics
+from src.touchanything.utils.metrics import compute_tactile_metrics
 
 # ---------------------------------------------------------------------------
 # Import visualization functions from visualize_hdf5.py

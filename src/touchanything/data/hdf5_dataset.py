@@ -2,7 +2,7 @@
 TouchAnything HDF5 Dataset for PyTorch
 
 Example usage:
-    from src.data.hdf5_dataset import TouchAnythingHDF5Dataset
+    from src.touchanything.data.hdf5_dataset import TouchAnythingHDF5Dataset
     
     dataset = TouchAnythingHDF5Dataset(
         hdf5_files=['path/to/traj1.hdf5', 'path/to/traj2.hdf5'],

@@ -12,7 +12,7 @@ import cv2
 from decord import VideoReader, cpu
 from typing import Dict, List, Tuple, Optional
 
-from src.utils.pressure_map import generate_pseudo_pressure_maps_batch
+from src.touchanything.utils.pressure_map import generate_pseudo_pressure_maps_batch
 
 
 # Projection / cropping helpers (module-level for pickling with multiprocess DataLoader)

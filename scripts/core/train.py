@@ -17,11 +17,11 @@ from tqdm import tqdm
 import numpy as np
 from datetime import datetime
 
-from src.data import EgoDexDatasetV2, get_transforms, build_dataset
-from src.data.egodex_dataset_v2 import collate_fn
-from src.models import build_model
-from src.losses import PoseLoss, TactileLoss
-from src.utils import load_config_with_base, setup_logger, compute_all_metrics, save_config
+from src.touchanything.data import EgoDexDatasetV2, get_transforms, build_dataset
+from src.touchanything.data.egodex_dataset_v2 import collate_fn
+from src.touchanything.models import build_model
+from src.touchanything.losses import PoseLoss, TactileLoss
+from src.touchanything.utils import load_config_with_base, setup_logger, compute_all_metrics, save_config
 
 
 def parse_args():

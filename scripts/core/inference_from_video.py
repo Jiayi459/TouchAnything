@@ -47,10 +47,10 @@ from hamer.datasets.vitdet_dataset import ViTDetDataset
 from hamer.utils.renderer import cam_crop_to_full
 from third_party.hamer.vitpose_model import ViTPoseModel
 
-from src.models import build_model
-from src.utils.config import load_config_with_base
-from src.data.transforms import VideoTransform
-from src.utils.vis_pressure import (render_pressure_panel, PRESS_W, PRESS_H, pred_to_21,
+from src.touchanything.models import build_model
+from src.touchanything.utils.config import load_config_with_base
+from src.touchanything.data.transforms import VideoTransform
+from src.touchanything.utils.vis_pressure import (render_pressure_panel, PRESS_W, PRESS_H, pred_to_21,
                                     SENSOR_NAN_MASK_L, SENSOR_NAN_MASK_R)
 
 # Video layout constants.

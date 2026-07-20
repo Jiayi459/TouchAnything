@@ -130,13 +130,27 @@ Data: `datasets/EgoTouch/`, `datasets/grasp_hold_lift_tactile/` (both gitignored
 
 ---
 
-## Proposed target structure (for discussion — NOT applied)
+## APPLIED structure (2026-07-20)
+Decision: 3 groups + shared; move (staged + tested); keep single `src/` import root.
+
+**DONE + verified — `src/` packages:**
 ```
-touchanything/     # A: src/{data,models,losses,utils,datasets,resources}, scripts/core, TA configs, assets
-tactile_pixel/     # C: tactile_forecast pixel stack + predictability study + EgoTouch/OpenTouch scripts/configs/docs
-actionsense/       # B: physical_state, state_forecast, action_dynamics, eval_harness, ActionSense scripts/configs/docs/tests
-shared/            # D: CRC env, root docs (or leave at root)
+src/actionsense/    # B: physical_state, state_forecast, action_dynamics (probGRU), eval_harness/
+src/tactile_pixel/  # C: data, engine, train, eval, baselines, tactile_utils, categories, predictability, models/
+src/touchanything/  # A: data/, models/, losses/, utils/, datasets/, resources/
 ```
+- Stage 1 (`3c13dfe`): B → `src/actionsense/`. Verified: pytest 7/7, `python -m src.actionsense.eval_harness.evaluate` identical hash + determinism.
+- Stage 2: C → `src/tactile_pixel/`. Verified: imports + `--help` entry points + probe cross-imports.
+- Stage 3: A → `src/touchanything/`. Verified: 25 files py_compile (full runtime needs DINOv2/MANO, CRC-only).
+
+**DONE — `configs/` grouped:** `configs/{actionsense,tactile_pixel,touchanything}/`. Harness re-verified.
+
+**NOT moved (intentional):**
+- `scripts/` — grouping needs per-script `sys.path` depth fixes + updating every invocation ref in
+  docs/CRC jobs; only the ActionSense scripts are runtime-testable locally. Logical map stands (see §B/§C/§A above).
+- `docs/`, `data/` — referenced by path from the FROZEN harness config (`out_csv: docs/...`,
+  `states_root: data/actionsense_states`) and many doc links; moving them breaks outputs for no benefit.
+- `scripts/crc/`, root files — shared/infra, stay at their locations.
 
 ## Risks of a physical move (why staging + approval first)
 1. **Import rewrites everywhere** — `from src.tactile_forecast import ...`, `from src.models ...`,
@@ -149,10 +163,12 @@ shared/            # D: CRC env, root docs (or leave at root)
 Mitigation: move in verified stages (one bucket at a time), fix imports, run `pytest` + a smoke
 `python -m ...evaluate` after each stage.
 
-## Open questions
-- **Q1** 2 buckets or 3? A strict TouchAnything-vs-ActionSense split leaves the EgoTouch/OpenTouch
-  pixel+predictability work (C) homeless. Recommend **3 dataset groups** (A/B/C) + shared.
-- **Q2** Physically MOVE files (with full import rewrite, staged + tested) — or keep code in place and
-  just adopt this doc as the logical map? Moving is higher-risk; the doc gives 90% of the clarity.
-- **Q3** Package layout: keep the single `src/` import root (move subtrees within it) or create
-  top-level per-dataset dirs (bigger blast radius on imports/`python -m`)?
+## Resolved (all confirmed by user 2026-07-20)
+- Q1 → **3 groups + shared** (A/B/C). Q2 → **move, staged + tested**. Q3 → **single `src/` root**.
+
+## Remaining (optional, awaiting go-ahead)
+- **scripts/ grouping** into `scripts/{actionsense,tactile_pixel,touchanything}/` — requires fixing
+  each moved script's `sys.path.insert(...)` depth and every `python scripts/X.py` reference in
+  docs + CRC `.job` files. ActionSense scripts are testable; A/C script invocations are not (CRC).
+- **docs/ + data/ grouping** — deferred: they are referenced by path from the frozen harness config
+  and would break output/data paths. Would require editing the (frozen) config + hash.

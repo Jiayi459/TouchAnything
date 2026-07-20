@@ -1469,3 +1469,16 @@ REMAINING: stage 2 (C: rename src/tactile_forecast -> src/tactile_pixel), stage 
 models,losses,utils,datasets,resources} -> src/touchanything/). Both are NOT runtime-testable locally
 (training deps absent) -> will be static/compile + import-checked only. Plus scripts/configs/docs/data
 grouping. Target: src/{touchanything,tactile_pixel,actionsense}/ + shared.
+
+### Reorg STAGES 2-4a DONE (2026-07-20)
+Stage 2: src/tactile_forecast -> src/tactile_pixel (group C: EgoTouch/OpenTouch pixel + predictability).
+  Verified: C imports+compile; src.tactile_pixel.{train,eval} --help; probe_actionsense B+C cross-imports.
+Stage 3: src/{data,models,losses,utils,datasets,resources} -> src/touchanything/ (group A upstream).
+  A independent of B/C. Verified: 25 files py_compile; B+C+pytest still pass. (Full A runtime = CRC-only.)
+Stage 4a: configs/ grouped -> configs/{actionsense,tactile_pixel,touchanything}/. Updated eval_harness
+  DEFAULT_CONFIG + wilor mapping paths + doc/CRC refs. Harness re-verified (determinism PASS).
+FINAL src/: actionsense/ tactile_pixel/ touchanything/ (+ __init__). configs/ grouped likewise.
+DEFERRED (documented in docs/REPO_ORGANIZATION.md): scripts/ grouping (needs per-script sys.path depth
+fix + invocation-ref updates in docs/CRC jobs; only ActionSense scripts testable locally); docs/ + data/
+(referenced by path from the FROZEN harness config -> moving breaks outputs). Awaiting user go on those.
+Commits: 3c13dfe (s1) + s2 + s3 + s4a. AGENTS.md/tmp_diag kept untracked throughout.

@@ -1441,3 +1441,17 @@ autocorrelation peak in 0.3-3 s under its slow trend (autocorr monotonically dec
 max). Options to make seasonal engage: estimate the period on a CAUSAL detrended signal (first
 difference or causal high-pass; TRAIN-only, still causal per constraint 1). NOT added silently ->
 awaiting user decision. Deliverables 1-5 complete; no retrain.
+
+### Session (2026-07-20) — repo reorganization: file-by-file dataset categorization (NO move yet)
+User asked to group TouchAnything-dataset files vs ActionSense files, but FIRST document what each
+file does + its dataset, rigorously from code + SESSION_LOG. Wrote docs/REPO_ORGANIZATION.md.
+FINDING: not a clean 2-way split — THREE dataset bodies + shared:
+  A TouchAnything upstream (video+pose+tactile-pixel; DINOv2/MANO/WiLoR; EgoDex/EgoPressure)
+  B ActionSense (ours: physical_state, state_forecast v1, action_dynamics v2 probGRU, eval_harness)
+  C EgoTouch/OpenTouch (ours: predictability study + tactile-PIXEL forecaster; EgoTouch deprecated)
+  D shared/infra/root.
+COUPLING: B and C are interleaved in ONE package src/tactile_forecast/ (shared __init__/categories/
+predictability) -> main import-risk for any physical move. Proposed target dirs touchanything/,
+tactile_pixel/, actionsense/, shared/. OPEN QUESTIONS (awaiting user): Q1 2 vs 3 buckets (recommend
+3); Q2 physically move (staged+tested, high-risk) vs adopt the doc as logical map; Q3 keep src/ root
+vs top-level per-dataset dirs. NOTHING MOVED — plan-before-code.

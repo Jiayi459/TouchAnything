@@ -10,7 +10,7 @@ Two notions of "easier to predict" are reported (per user decision, both; skill 
 - **Raw forecastability** — low `persistence_nMSE` (signal decorrelates slowly).
 - **Structured/learnable** — high `periodicity` + low `contact_migration` (a model can win over
   persistence). A trained skill-over-persistence number requires the GPU forecaster
-  (`src/tactile_forecast`, runs on CRC); the numbers below are the **training-free probe**
+  (`src/tactile_pixel`, runs on CRC); the numbers below are the **training-free probe**
   (`scripts/predictability_by_category.py`) that predicts where that skill will be highest.
 
 ---
@@ -182,7 +182,7 @@ user against; abrupt/discrete actions do not.
 ## 5. Confirming with the real forecaster (per-category training)
 
 The probe is training-free; the *actual* skill-over-persistence is measured by
-`src/tactile_forecast` (SimVP/ConvGRU). A `--category` filter now selects trajectories by the
+`src/tactile_pixel` (SimVP/ConvGRU). A `--category` filter now selects trajectories by the
 taxonomy above, and a CRC job trains + Leave-Trajectory-Out CV within one category:
 
 ```bash

@@ -39,7 +39,7 @@ if [ -z "${CATEGORY:-}" ]; then echo "ERROR: set CATEGORY via -v"; exit 2; fi
 
 # Per-category forecasting on the full EgoTouch scope, LTO by default.
 # --scope full  -> datasets/EgoTouch ; --category filters trajectories by verb taxonomy.
-python -m src.tactile_forecast.train \
+python -m src.tactile_pixel.train \
     --config "${CONFIG:-configs/tactile/simvp.yaml}" \
     --scope full \
     --category "${CATEGORY}" \

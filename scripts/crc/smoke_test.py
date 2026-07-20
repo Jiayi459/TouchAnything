@@ -12,9 +12,9 @@ import numpy as np
 import torch
 
 sys.path.insert(0, ".")
-from src.tactile_forecast import baselines, engine            # noqa: E402
-from src.tactile_forecast import tactile_utils as U           # noqa: E402
-from src.tactile_forecast.models import build_model           # noqa: E402
+from src.tactile_pixel import baselines, engine            # noqa: E402
+from src.tactile_pixel import tactile_utils as U           # noqa: E402
+from src.tactile_pixel.models import build_model           # noqa: E402
 
 B, t_in, t_out, C, H, W = 4, 10, 15, 2, 21, 21
 dev = "cuda" if torch.cuda.is_available() else "cpu"

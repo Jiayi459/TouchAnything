@@ -89,7 +89,7 @@ Monitor: `qstat -u $USER` (state `qw`=queued, `r`=running); kill with `qdel JOBI
 
 ## 5. Evaluate / collect results
 ```bash
-python -m src.tactile_forecast.eval --ckpt runs/convgru_grasp_lto_f0/best.pt --fold 0
+python -m src.tactile_pixel.eval --ckpt runs/convgru_grasp_lto_f0/best.pt --fold 0
 # pull results back to your machine (LOCAL):
 rsync -avz netid@crcfe01.crc.nd.edu:~/TouchAnything/runs/ ./runs/
 ```
@@ -139,7 +139,7 @@ Run dirs: `runs/simvp_full_<slug>_lto_f<fold>/summary.json`. `aggregate_results.
 - The repo's top-level `environment.yaml` (full DINOv2/xformers stack) is **not** needed here —
   `environment_tactile_cuda.yaml` is the lean env.
 - Bump the torch/cu124 pin in `setup_crc_env.sh` if the cluster driver needs a newer CUDA.
-- `--category` filters by the verb taxonomy in `src/tactile_forecast/categories.py`; LTO (default)
+- `--category` filters by the verb taxonomy in `src/tactile_pixel/categories.py`; LTO (default)
   is the right protocol for cross-category comparison. LOTO needs ≥2 tasks in a category
   (Spray/Cut/Pinch have 1–2 → LTO only).
 - Support: crcsupport@nd.edu.

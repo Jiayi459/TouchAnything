@@ -217,7 +217,7 @@ training target; the Windows box is for data prep, baselines, and dataloader/met
 
 ## 9. Deliverables — BUILT (2026-06-18, "go")
 
-Implemented `src/tactile_forecast/`:
+Implemented `src/tactile_pixel/`:
 - `tactile_utils.py` — torch-free core (sensor mask, amplitude transforms, windowing, LTO/LOTO
   splits, numpy per-horizon metrics). **Verified locally** vs real data (mask 217/hand, 5,955
   windows, splits, metrics).
@@ -251,5 +251,5 @@ Headline metric = **mean skill vs persistence**.
 6. **Scope → deterministic** next-frame map prediction. Generative/uncertainty deferred.
 7. **Install → CUDA.** Set up a CUDA PyTorch env on CRC (no local CPU torch needed).
 
-### Next phase after env setup (awaiting "go"): build `src/tactile_forecast/` (dataset/masking,
+### Next phase after env setup (awaiting "go"): build `src/tactile_pixel/` (dataset/masking,
 ConvGRU/ConvLSTM/SimVP, train/eval, CV harness) per §8 milestones.

@@ -11,7 +11,7 @@ Labels: a CSV/TSV (`final_annotations`) keyed by clip id, columns include
 We map each clip's free-text `action` through the SAME categorize() verb taxonomy used
 for EgoTouch, so OpenTouch results sit in the same category / temporal-pattern space and
 are directly comparable across datasets. Metrics come from the shared
-src/tactile_forecast/predictability.py (identical math to the EgoTouch probe).
+src/tactile_pixel/predictability.py (identical math to the EgoTouch probe).
 
 Usage (run from repo root, on CRC after `bash scripts/download_data.sh`):
     python scripts/probe_opentouch.py --data-dir data --labels final_annotations --inspect
@@ -28,8 +28,8 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src.tactile_forecast.categories import categorize_phrase, TEMPORAL_PATTERN  # noqa: E402
-from src.tactile_forecast import predictability as P  # noqa: E402
+from src.tactile_pixel.categories import categorize_phrase, TEMPORAL_PATTERN  # noqa: E402
+from src.tactile_pixel import predictability as P  # noqa: E402
 
 KEY_CANDIDATES = ("key", "scene_clip", "scene::clip", "clip_id", "clip", "clip_name")
 

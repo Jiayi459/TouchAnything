@@ -1,6 +1,6 @@
 """Evaluate a saved checkpoint on a CV fold's test split (model vs baselines).
 
-python -m src.tactile_forecast.eval --ckpt runs/convgru_grasp_lto_f0/best.pt \
+python -m src.tactile_pixel.eval --ckpt runs/convgru_grasp_lto_f0/best.pt \
     --protocol lto --fold 0 --scope grasp
 """
 from __future__ import annotations

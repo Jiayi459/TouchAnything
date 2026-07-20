@@ -8,7 +8,7 @@ Start/Stop label markers, resample each clip to a common 30 Hz (to match EgoTouc
 frame-based metrics), stack both gloves -> (T,2,H,W), and probe.
 
 Activity labels are verb-first phrases ('Peel a cucumber', 'Pour water ...') mapped through the
-shared categorize_phrase() taxonomy. Metrics from src/tactile_forecast/predictability.py.
+shared categorize_phrase() taxonomy. Metrics from src/tactile_pixel/predictability.py.
 Subjects S00-S05 wore tactile gloves; S06-S09 did not (files auto-skip: no tactile stream).
 
 Usage (run from repo root):
@@ -24,8 +24,8 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src.tactile_forecast.categories import categorize_phrase, TEMPORAL_PATTERN  # noqa: E402
-from src.tactile_forecast import predictability as P  # noqa: E402
+from src.tactile_pixel.categories import categorize_phrase, TEMPORAL_PATTERN  # noqa: E402
+from src.tactile_pixel import predictability as P  # noqa: E402
 from src.actionsense import physical_state as PS  # noqa: E402
 
 TACTILE_KEYS = ("tactile-glove-left", "tactile-glove-right")

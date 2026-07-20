@@ -24,6 +24,6 @@ print("CUDA:", torch.cuda.is_available(),
 PY
 
 # Larger stride + batch keep pretraining fast (361k windows@stride5 -> ~90k@stride20).
-python -m src.tactile_forecast.train --config configs/tactile/simvp.yaml \
+python -m src.tactile_pixel.train --config configs/tactile/simvp.yaml \
     --scope full --pretrain --exclude-grasp --out runs/simvp_pretrain \
     --epochs 30 --stride 20 --batch-size 256 --num-workers 4

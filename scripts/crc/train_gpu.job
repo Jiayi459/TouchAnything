@@ -29,7 +29,7 @@ PY
 #   qsub -v CONFIG=configs/tactile/convgru.yaml,FOLD=0,PRETRAINED=runs/convgru_pretrain/best.pt train_gpu.job
 PRETRAINED_ARG=""
 if [ -n "${PRETRAINED:-}" ]; then PRETRAINED_ARG="--pretrained ${PRETRAINED}"; fi
-python -m src.tactile_forecast.train \
+python -m src.tactile_pixel.train \
     --config "${CONFIG:-configs/tactile/convgru.yaml}" \
     --protocol "${PROTOCOL:-lto}" \
     --fold "${FOLD:-0}" \

@@ -20,12 +20,12 @@ user feedback / adaptive strategies to improve performance. Priors under test: a
 
 ## 3. Method
 Two complementary tools, both sensor-agnostic:
-- **Training-free predictability probe** (`src/tactile_forecast/predictability.py`): per clip,
+- **Training-free predictability probe** (`src/tactile_pixel/predictability.py`): per clip,
   from the tactile (T,C,H,W) alone — `persistence_nMSE@h` (raw forecastability), `periodicity`
   (max total-force autocorrelation), `contact_migration` (1−IoU of active-taxel mask), and a
   z-scored composite `predictability_index (PI)`. Per-dataset probes segment/label clips and
   group by raw action / mapped category / temporal-pattern axis.
-- **Trained forecaster** (`src/tactile_forecast/`): SimVP / ConvLSTM / ConvGRU predicting future
+- **Trained forecaster** (`src/tactile_pixel/`): SimVP / ConvLSTM / ConvGRU predicting future
   pressure frames from past, scored as *skill over persistence*; `--category` filter + CRC sweep
   (`run_percategory.sh`) for per-category skill. (Run so far on EgoTouch only.)
 
@@ -60,9 +60,9 @@ cycle has force-reversal turning points a forecaster must anticipate; a ramp doe
   (+ `scripts/crc/stream_actionsense.sh` streaming driver).
 - Forecaster: library `src/actionsense/action_dynamics.py` (model+train+forecast); CLIs
   `scripts/train_action_dynamics.py` (train->checkpoint) and `scripts/plot_action_forecast.py` (plot).
-- Shared metrics: `src/tactile_forecast/predictability.py`; taxonomy `src/tactile_forecast/categories.py`.
+- Shared metrics: `src/tactile_pixel/predictability.py`; taxonomy `src/tactile_pixel/categories.py`.
 - Result CSVs: `docs/predictability_{by_category_full,opentouch,actionsense}.csv`.
-- Forecaster + CRC jobs: `src/tactile_forecast/`, `scripts/crc/{percategory_gpu.job,run_percategory.sh}`.
+- Forecaster + CRC jobs: `src/tactile_pixel/`, `scripts/crc/{percategory_gpu.job,run_percategory.sh}`.
 
 ## 7. Decisions & new direction (2026-07-03)
 - **Drop EgoTouch going forward.** The usable hardware is the tactile glove behind the 3 linked

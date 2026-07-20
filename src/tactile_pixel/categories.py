@@ -5,7 +5,7 @@ its tokens left-to-right for the first known action verb, and each category to a
 temporal-pattern class (Axis B) used by the predictability study.
 
 Imported by:
-  - src/tactile_forecast/train.py   (--category filter for per-category forecasting)
+  - src/tactile_pixel/train.py   (--category filter for per-category forecasting)
   - scripts/categorize_actions.py   (re-exports; classification CLI)
   - scripts/predictability_by_category.py (via categorize_actions)
 

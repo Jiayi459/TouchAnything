@@ -3,15 +3,15 @@
 Examples
 --------
 # Leave-Trajectory-Out fold 0, ConvGRU, grasp subset:
-python -m src.tactile_forecast.train --config configs/tactile/convgru.yaml \
+python -m src.tactile_pixel.train --config configs/tactile/convgru.yaml \
     --protocol lto --fold 0 --scope grasp
 
 # Pretrain on ALL trajectories (no held-out test), save checkpoint:
-python -m src.tactile_forecast.train --config configs/tactile/convgru.yaml \
+python -m src.tactile_pixel.train --config configs/tactile/convgru.yaml \
     --scope full --pretrain --out runs/convgru_pretrain
 
 # Fine-tune from a pretrained checkpoint:
-python -m src.tactile_forecast.train --config configs/tactile/convgru.yaml \
+python -m src.tactile_pixel.train --config configs/tactile/convgru.yaml \
     --protocol lto --fold 0 --scope grasp --pretrained runs/convgru_pretrain/best.pt
 """
 from __future__ import annotations
@@ -74,7 +74,7 @@ def main():
                          "grasp fine-tune/LOTO test truly unseen)")
     ap.add_argument("--category", default=None,
                     help="keep only trajectories whose task maps to this action category "
-                         "(see src/tactile_forecast/categories.py). For per-category forecasting.")
+                         "(see src/tactile_pixel/categories.py). For per-category forecasting.")
     ap.add_argument("--pretrained", default=None, help="checkpoint to init weights from")
     ap.add_argument("--out", default=None)
     ap.add_argument("--epochs", type=int, default=None)

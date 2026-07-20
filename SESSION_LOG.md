@@ -1455,3 +1455,17 @@ predictability) -> main import-risk for any physical move. Proposed target dirs 
 tactile_pixel/, actionsense/, shared/. OPEN QUESTIONS (awaiting user): Q1 2 vs 3 buckets (recommend
 3); Q2 physically move (staged+tested, high-risk) vs adopt the doc as logical map; Q3 keep src/ root
 vs top-level per-dataset dirs. NOTHING MOVED — plan-before-code.
+
+### Reorg STAGE 1 DONE (2026-07-20) — ActionSense -> src/actionsense/  [verified]
+git mv physical_state.py, state_forecast.py, action_dynamics.py, eval_harness/ from
+src/tactile_forecast/ -> src/actionsense/ (+ new __init__). Rewrote imports in scripts
+(check_leakage, train_action_dynamics, train_state_forecaster, probe_actionsense, plot_*),
+tests/test_harness.py, and prose path refs (configs/eval_harness.yaml, docs). probe_actionsense
+still imports categories/predictability from tactile_forecast (group C, moves in stage 2).
+VERIFIED locally: pytest 7 pass; `python -m src.actionsense.eval_harness.evaluate` -> identical
+config_hash b0194860 + determinism PASS; all B imports OK. src/tactile_forecast/ now = pure group C.
+Fixed a `git add -A` slip that swept AGENTS.md + tmp_diag (untracked again, local kept).
+REMAINING: stage 2 (C: rename src/tactile_forecast -> src/tactile_pixel), stage 3 (A: src/{data,
+models,losses,utils,datasets,resources} -> src/touchanything/). Both are NOT runtime-testable locally
+(training deps absent) -> will be static/compile + import-checked only. Plus scripts/configs/docs/data
+grouping. Target: src/{touchanything,tactile_pixel,actionsense}/ + shared.

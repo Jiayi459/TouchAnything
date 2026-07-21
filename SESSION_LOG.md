@@ -1495,3 +1495,32 @@ Commits: 3c13dfe (s1) + s2 + s3 + s4a. AGENTS.md/tmp_diag kept untracked through
    3-dim 1-hand) which the harness redefined (raw 6-dim) -> the probGRU would need re-scoping first.
 3. Reorg scripts/docs/data grouping -> CLOSED earlier (user: "stop here"; src/ + configs/ grouped).
 STATUS: no open questions remain. Ready to start new work.
+
+### Session (2026-07-21) — PLAN APPROVED: forecast F/CoP from the tactile MAP (flatten vs CNN)
+
+Full plan: C:\Users\haoji\.claude\plans\cheeky-meandering-wigderson.md. Summary:
+
+GOAL: does the raw tactile pressure MAP carry extra spatially-structured signal for forecasting the
+next 1 s of the 6-dim F/CoP target? Two encoders feeding an IDENTICAL GRU+one-shot head (only the
+per-frame encoder differs): (a) FLATTEN (2x32x32 -> Linear -> d), (b) CNN (conv -> d). If CNN > flatten,
+spatial structure of the contact patch contributes. Scored on the FROZEN eval harness (vs persistence/
+seasonal/AR) via --model-preds.
+
+LOCKED DECISIONS: target = future 6-dim F/CoP (harness, unchanged); RE-STREAM CRC for all 75 Slice/Peel
+maps (only 45/75 local now); per-taxel baseline = FIRST-N-FRAMES (causal, replaces non-causal whole-clip
+5th-pct); map amplitude = log1p + single GLOBAL train scale (same all taxels); time scale/split/target
+MATCH the harness (ds=3 ->10Hz, horizon 10, origins min_history=40); SWEEP history t_in in {1,3,10 s}
+(10/30/100 frames) for both encoders; left-pad early windows with zeros (post-baseline no-contact) so
+predictions exist at every harness origin (fair-comparison caveat).
+
+STEPS: (1) CRC re-stream probe_actionsense --save-clips-for "Slice,Peel"; verify state_N.npy identical
+(preserves splits/target); scp clip_N.npy local. (2) new src/actionsense/tactile_map/data.py
+preprocessing. (3) reuse eval_harness dataset.load_target / splits / baselines.origins for target+windows.
+(4) models.py FlattenEncoder / CNNEncoder / shared Seq2Seq. (5) 2 enc x 3 hist = 6 runs -> export
+preds_<enc>_<hist>.npz -> harness --model-preds -> compare (skill vs history, flatten vs cnn vs baselines).
+FILES: src/actionsense/tactile_map/{__init__,data,models,train,export_preds}.py; configs/actionsense/
+tactile_map.yaml; scripts/train_tactile_map.py; tests/test_tactile_map.py. REUSE: eval_harness/*,
+tactile_pixel/tactile_utils.make_transform. VERIFY: unit tests (baseline causal, origin-alignment,
+log1p invertible, train-only norm) + CPU smoke train + harness scoring + flatten-vs-cnn plot.
+NOTE: target keeps whole-clip-baseline F/CoP (comparability); new causal baseline affects MAP INPUT only.
+IMPLEMENTATION: build code + smoke-test on the 45 local maps first; full 75-map run after CRC re-stream.

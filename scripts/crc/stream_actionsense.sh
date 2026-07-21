@@ -10,6 +10,14 @@ REPO="$HOME/TouchAnything"
 PROBE="$REPO/scripts/probe_actionsense.py"
 DEST="${1:-$HOME/actionsense}"
 ACC="$DEST/acc.jsonl"
+
+# numpy/h5py/scipy live in the `tactile` conda env, NOT in (base). Activate it, then FAIL FAST if
+# the deps are missing -- otherwise every ~24 GB download is wasted on a probe that can't import numpy.
+source "$(conda info --base 2>/dev/null)/etc/profile.d/conda.sh" 2>/dev/null || true
+conda activate tactile 2>/dev/null || echo "WARN: 'conda activate tactile' failed; activate it manually"
+python -c "import numpy, h5py, scipy" 2>/dev/null || {
+  echo "ERROR: the tactile env is not active (import numpy/h5py/scipy failed)."
+  echo "       Run 'conda activate tactile' first, then re-run this script."; exit 1; }
 mkdir -p "$DEST"
 rm -f "$DEST"/*.hdf5 "$ACC"          # clear any partial files + old accumulator
 rm -rf "$DEST/states"                # clear old state extraction (avoid duplicate append)

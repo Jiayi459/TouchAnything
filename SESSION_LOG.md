@@ -1482,3 +1482,16 @@ DEFERRED (documented in docs/REPO_ORGANIZATION.md): scripts/ grouping (needs per
 fix + invocation-ref updates in docs/CRC jobs; only ActionSense scripts testable locally); docs/ + data/
 (referenced by path from the FROZEN harness config -> moving breaks outputs). Awaiting user go on those.
 Commits: 3c13dfe (s1) + s2 + s3 + s4a. AGENTS.md/tmp_diag kept untracked throughout.
+
+### OPEN QUESTIONS CLOSED (2026-07-21) — clean slate before new work
+1. SEASONAL-NAIVE inert (raw aggregate force/CoP has no autocorrelation peak under its slow trend)
+   -> RESOLVED: close as a documented finding. Leave seasonal as fallback-to-persistence. Rationale:
+   causal detrending would fix period DETECTION but not ACCURACY (seasonal copies the RAW value one
+   period back; for a slow-drifting signal "one period ago ~ now" -> stays ~persistence). AR is the
+   strong baseline that beats persistence. NO code change.
+2. probGRU one-shot-decoder comparison + AR(1) baseline (approved 2026-07-13, never built)
+   -> RESOLVED: close as SUPERSEDED. The frozen eval_harness AR baseline replaces AR(1); the one-shot
+   vs autoregressive probGRU comparison is moot because the probGRU predicts the OLD target (fast
+   3-dim 1-hand) which the harness redefined (raw 6-dim) -> the probGRU would need re-scoping first.
+3. Reorg scripts/docs/data grouping -> CLOSED earlier (user: "stop here"; src/ + configs/ grouped).
+STATUS: no open questions remain. Ready to start new work.

@@ -1,0 +1,24 @@
+# Tactile-MAP -> F/CoP forecaster (flatten vs CNN). Model + input-preprocessing hyperparameters.
+# Rate / horizon / split / target come from the FROZEN harness (configs/actionsense/eval_harness.yaml);
+# this file only controls the map encoder + its preprocessing + optimization.
+
+preprocess:
+  baseline_frames: 10    # per-taxel causal baseline = mean of the first N frames (N=10 = 1 s @ 10 Hz)
+  alpha: 10.0            # log1p amplitude compression strength
+
+model:
+  d: 64                 # per-frame embedding dim (same for flatten + CNN -> controlled comparison)
+  hidden: 64            # GRU hidden size
+
+optim:
+  epochs: 60
+  lr: 0.003
+  batch: 64
+  seed: 0
+
+sweep:
+  encoders: [flatten, cnn]
+  histories_s: [1, 3, 10]   # input history t_in in seconds -> {10, 30, 100} frames @ 10 Hz
+
+paths:
+  out_dir: runs/tactile_map        # preds_<encoder>_<hist>s.npz written here

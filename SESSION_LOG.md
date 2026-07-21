@@ -1524,3 +1524,30 @@ tactile_pixel/tactile_utils.make_transform. VERIFY: unit tests (baseline causal,
 log1p invertible, train-only norm) + CPU smoke train + harness scoring + flatten-vs-cnn plot.
 NOTE: target keeps whole-clip-baseline F/CoP (comparability); new causal baseline affects MAP INPUT only.
 IMPLEMENTATION: build code + smoke-test on the 45 local maps first; full 75-map run after CRC re-stream.
+
+### IMPLEMENTATION (2026-07-21) — tactile-map -> F/CoP forecaster BUILT + smoke-verified
+New pkg src/actionsense/tactile_map/: data.py (causal first-N-frame per-taxel baseline + log1p +
+global TRAIN scale + LAZY harness-aligned windows with zero left-pad), models.py (FlattenEncoder,
+CNNEncoder, shared GRU + one-shot head -> (B,H,6)), train.py (fit TRAIN / early-stop VAL / export
+TEST preds npz in RAW units). CLI scripts/train_tactile_map.py; configs/actionsense/tactile_map.yaml
+(baseline_frames=10, alpha=10, d=64, hidden=64, epochs=60, sweep encoders x histories{1,3,10 s}).
+Reuses eval_harness dataset.load_target / splits / baselines.origins / Norm. Deviation: inlined
+log1p compress in data.py (avoid actionsense->tactile_pixel cross-group dep instead of make_transform).
+tests/test_tactile_map.py: 8 pass (window causality, origin alignment, left-pad, log1p, baseline
+first-N, model shapes, real-map load). 15/15 across both harness suites.
+
+HARNESS BUG FIXED: baselines/__init__.py now exports `origins` (score_external used BL.origins; the
+--model-preds path had never been exercised until now).
+
+SMOKE (available maps, 1s hist, 2 epochs, 27 train / 9 test): train+export+HARNESS SCORING works
+end-to-end. Skill vs persistence: flatten -1.82, cnn -3.03 (both < persistence) -- EXPECTED for a
+2-epoch undertrained model (must infer current F/CoP level from the map while persistence gets the
+last value free). Mechanics proven; real training will show the actual flatten-vs-cnn result.
+
+DATA GAP FOUND + FIX: only 45/75 slice/peel had maps because stream_actionsense.sh used
+`--save-clips-for "Pour,Slice"` (Peel never saved -> all 30 Peel missing). Fixed to
+"Pour,Slice,Peel". RE-STREAM NEEDED on CRC to cache Peel maps (per approved plan). available_idxs()
+checks file existence, so after copying clips locally the full sweep just runs (no manifest edit needed).
+
+NEXT: user runs CRC re-stream (git pull -> bash scripts/crc/stream_actionsense.sh), verify state_0.npy
+identical (idx mapping preserved), scp clip_*.npy to local, then run the full 6-run sweep + harness score.

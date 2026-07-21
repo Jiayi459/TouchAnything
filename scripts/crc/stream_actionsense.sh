@@ -47,7 +47,9 @@ for URL in "${URLS[@]}"; do
   fi
   python "$PROBE" --data-dir "$DEST" --jsonl "$ACC" --extract-states "$DEST/states" \
       --save-clips-for "Pour,Slice,Peel" || echo "  WARN: probe error on this file"
-  rm -f "$f"                          # reclaim space before the next download
+  # KEEP=1 retains the HDF5 (download once to a big quota like /scratch365, re-process for free);
+  # default deletes each file to bound disk on the small home quota.
+  [ "${KEEP:-0}" = "1" ] || rm -f "$f"
 done
 
 echo ""

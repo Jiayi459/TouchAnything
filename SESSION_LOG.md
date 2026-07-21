@@ -1551,3 +1551,15 @@ checks file existence, so after copying clips locally the full sweep just runs (
 
 NEXT: user runs CRC re-stream (git pull -> bash scripts/crc/stream_actionsense.sh), verify state_0.npy
 identical (idx mapping preserved), scp clip_*.npy to local, then run the full 6-run sweep + harness score.
+
+### CRC LOGIN — reference (2026-07-21)  (source: scripts/crc/README.md §0 + session notes)
+NetID = jhao3. UGE scheduler (qsub/qstat/qrsh). Front-end has NO GPU (torch.cuda False there) ->
+GPU work goes through qsub batch jobs.
+- On campus / ND VPN:      ssh -Y jhao3@crcfe01.crc.nd.edu     (crcfe02 also works)
+- Off campus (no VPN):     ssh -Y jhao3@bastion.crc.nd.edu     then on bastion:  ssh crcfe01
+- Auth: NetID password + 2FA (Google Authenticator passcode, per account setup).
+- Passwordless (optional): ssh-keygen -t ed25519 ; ssh-copy-id jhao3@crcfe01.crc.nd.edu (2FA may still apply).
+- After login: echo $0 ; if not bash -> run `bash` ; then `conda activate tactile`.
+- Repo on CRC: cd ~/TouchAnything && git pull   (fork: github.com/Jiayi459/TouchAnything).
+- Pull results back to local: rsync -avz jhao3@crcfe01.crc.nd.edu:~/TouchAnything/runs/ ./runs/
+  (CRC cannot push to GitHub without a PAT; use scp/rsync to move files).

@@ -1660,3 +1660,17 @@ DEMONSTRATION (raw/right/3s, same 70/15/15 clip split, 80 epochs, held-out TEST)
 were depressed by overfitting. TODO: re-run the full F/CoP sweep with early stopping to refresh the CSV.
 Baselines reminder: persistence = last-value (skill-0 reference, per-split); linear AR (harness, raw
 6-dim) = +0.18 mean skill (best right-CoP-x +0.25). Split confirmed leak-free (by clip, norm train-only).
+
+ssh -Y -J jhao3@bastion.crc.nd.edu jhao3@crcfe01.crc.nd.edu
+### RESULT (2026-07-22) — tactile-map CV on CRC GPU: CNN > flatten confirmed (5-fold, probabilistic)
+Full CRC GPU run of the 5-fold probabilistic CV (train_tactile_map_gpu.job, all 75 map recordings,
+80 epochs, early-stopped). Mean skill vs persistence + coverage (raw->calibrated):
+  cnn      1s +0.052  3s +0.050  10s +0.063   cov 0.93-0.94 -> 0.95
+  flatten  1s -0.040  3s -0.025  10s -0.026   cov 0.93      -> 0.95
+=> CNN beats flatten at EVERY history (spatial contact-patch structure contributes), now under the
+rigorous 5-fold + probabilistic + sigma-calibration protocol; bands calibrate cleanly to 0.95. CNN
+best at 10s (+0.063); flatten stays just below persistence. Consistent with the earlier deterministic
+frozen-split result (cnn +0.05..+0.08). Artifacts: docs/tactile_map_cv_results.csv, _skill_vs_history.png,
+_coverage.png. (AR on aggregates +0.18 still the ceiling -- map+CNN helps vs flatten but not vs AR yet.)
+Added scripts/plot_tactile_map_loss_curve.py (train/val/test NLL+MSE per epoch for both encoders) to
+check whether the map model overfits like the F/CoP one (running).

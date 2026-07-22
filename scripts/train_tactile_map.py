@@ -1,18 +1,20 @@
-"""Train the tactile-map -> F/CoP forecaster sweep (flatten vs CNN x history) + export preds.
+"""Cross-validate the tactile-map -> F/CoP forecaster (flatten vs CNN x history), probabilistic.
 
-Thin CLI over src/actionsense/tactile_map. For each (encoder, history) it trains on the frozen
-harness TRAIN split, early-stops on VAL, and exports TEST predictions as an .npz that the frozen
-harness scores:  python -m src.actionsense.eval_harness.evaluate --model-preds <npz> --model-name <n>
+Mirrors the F/CoP probGRU protocol: 5-fold CV by recording, probabilistic (mean+var) head, sigma
+calibration on a held-out VAL subset, skill-vs-persistence + coverage per channel & forecast step.
+Writes a tidy CSV. Heavy (encoders x histories x folds models) -> intended for CRC GPU.
 
-    python scripts/train_tactile_map.py                 # full run (needs all 75 maps)
-    python scripts/train_tactile_map.py --available --epochs 3   # local smoke on cached maps
+    python scripts/train_tactile_map.py                       # full CV sweep (GPU recommended)
+    python scripts/train_tactile_map.py --folds 2 --epochs 5  # quick local smoke
 """
 from __future__ import annotations
 
 import argparse
+import csv
 import os
 import sys
 
+import numpy as np
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -23,14 +25,14 @@ from src.actionsense.tactile_map import train as T                    # noqa: E4
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tm-config", default="configs/actionsense/tactile_map.yaml")
-    ap.add_argument("--available", action="store_true",
-                    help="restrict to recordings whose maps are cached locally (pre-restream smoke)")
-    ap.add_argument("--encoders", default=None, help="override sweep encoders, comma list")
-    ap.add_argument("--histories", default=None, help="override histories (s), comma list")
+    ap.add_argument("--encoders", default=None)
+    ap.add_argument("--histories", default=None)
+    ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--epochs", type=int, default=None)
+    ap.add_argument("--csv", default="docs/tactile_map_cv_results.csv")
     args = ap.parse_args()
 
-    cfg = load_config()                                  # frozen harness cfg (rate/horizon/split/target)
+    cfg = load_config()
     tmc = yaml.safe_load(open(args.tm_config))
     tm = {**tmc["preprocess"], **tmc["model"], **tmc["optim"]}
     if args.epochs:
@@ -38,25 +40,32 @@ def main():
     encoders = args.encoders.split(",") if args.encoders else tmc["sweep"]["encoders"]
     histories = [float(h) for h in args.histories.split(",")] if args.histories \
         else tmc["sweep"]["histories_s"]
-    out_dir = tmc["paths"]["out_dir"]
     fps = cfg.fps
-    print(f"harness: fps={fps:.0f} horizon={cfg.horizon}  encoders={encoders} histories(s)={histories}"
-          f"  {'[AVAILABLE-ONLY smoke]' if args.available else '[full split]'}\n")
+    recs = T.recordings(cfg, require_maps=True)
+    ch = cfg.channels
+    print(f"harness fps={fps:.0f} horizon={cfg.horizon}  {len(recs)} map recordings  "
+          f"encoders={encoders} histories(s)={histories}  folds={args.folds} epochs={tm['epochs']}\n")
 
-    for hist in histories:
-        t_in = int(round(hist * fps))
-        tr, va, mnorm, tnorm, te = T.build_datasets(cfg, tm, t_in, use_available=args.available)
-        print(f"--- history {hist:.0f}s (t_in={t_in})  train_windows={len(tr)} val={len(va)} "
-              f"test_recordings={len(te)} ---")
-        for enc in encoders:
-            model, vmse = T.train(tr, va, cfg, enc, tm, seed=tm["seed"])
-            preds = T.export(model, mnorm, tnorm, cfg, tm, t_in, te)
-            npz = os.path.join(out_dir, f"preds_{enc}_{hist:.0f}s.npz")
-            T.save_preds(npz, preds)
-            n_or = sum(p.shape[0] for p in preds.values())
-            print(f"  {enc:8}  val_mse={vmse:.4f}  -> {npz}  ({len(preds)} recs, {n_or} origins)")
-    print(f"\n[done] score each with: python -m src.actionsense.eval_harness.evaluate "
-          f"--model-preds {out_dir}/preds_<enc>_<hist>s.npz --model-name <enc>_<hist>s")
+    os.makedirs(os.path.dirname(args.csv), exist_ok=True)
+    fcsv = open(args.csv, "w", newline=""); w = csv.writer(fcsv)
+    w.writerow(["encoder", "history_s", "forecast_step_s", *[f"{c}_skill" for c in ch],
+                "mean_skill", "coverage_raw", "coverage_cal"])
+
+    print(f"{'enc':8}{'hist':>5} | {'meanSkill':>10} {'covRaw':>7} {'covCal':>7}")
+    print("-" * 42)
+    for enc in encoders:
+        for hist in histories:
+            t_in = int(round(hist * fps))
+            skc, sks, cr, cc = T.cross_validate(cfg, tm, enc, t_in, recs, folds=args.folds)
+            skc_m, sks_m = skc.mean(0), sks.mean(0)            # (6,), (H,6)
+            print(f"{enc:8}{hist:>4.0f}s | {float(skc_m.mean()):>+10.3f} {cr:>7.2f} {cc:>7.2f}")
+            for st in range(cfg.horizon):
+                w.writerow([enc, hist, round((st + 1) / fps, 2),
+                            *[f"{sks_m[st, j]:.4f}" for j in range(6)],
+                            f"{sks_m[st].mean():.4f}", f"{cr:.3f}", f"{cc:.3f}"])
+            fcsv.flush()
+    fcsv.close()
+    print(f"\n[csv] {args.csv}")
 
 
 if __name__ == "__main__":

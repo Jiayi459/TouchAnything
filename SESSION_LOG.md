@@ -1587,3 +1587,22 @@ Artifacts: docs/tactile_map_results.csv (9 models, tidy), docs/tactile_map_skill
 docs/tactile_map_skill_bars.png, scripts/plot_tactile_map.py. Ran on CPU locally (~25 min/sweep;
 models tiny). NEXT ideas: give CNN more capacity / combine map+aggregate (hybrid) to try to beat AR;
 probabilistic head; or CRC GPU for a bigger sweep.
+
+### UPGRADE (2026-07-22) — tactile-map model now matches the probGRU protocol (5-fold CV + probabilistic)
+Per user ("exactly what we did for F/CoP" -> add 5-fold CV + probabilistic head), ported the
+action_dynamics protocol onto the tactile-map CNN:
+- models.py Seq2Seq: now PROBABILISTIC one-shot head -> (mu, logvar) each (B,H,6); lv clamped [-6,4].
+- train.py: Gaussian NLL loss on the RESIDUAL; _predict/evaluate/calibrate_sigma/cross_validate.
+  5-fold CV by recording (norms+model fit on TRAIN; sigma calibrated on a VAL subset of TRAIN; skill
+  vs persistence + coverage@2sd measured on the held-out TEST fold). Persistence == residual 0, so
+  skill = 1 - MSE(mu)/MSE(resid). Uses ALL 75 map recordings (not the frozen 15-rec test).
+- scripts/train_tactile_map.py: CV sweep (encoder x history x folds) -> docs/tactile_map_cv_results.csv
+  [encoder,history_s,forecast_step_s, 6x <ch>_skill, mean_skill, coverage_raw, coverage_cal].
+- scripts/plot_tactile_map.py: skill-vs-history + coverage(raw/cal) from the CV CSV.
+- scripts/crc/train_tactile_map_gpu.job: symlinks ~/actionsense/states/clip_*.npy into data dir,
+  runs the CV sweep on GPU (30 trainings = 2 enc x 3 hist x 5 folds; GPU now genuinely warranted).
+- tests: 9 pass (model shape now (mu,lv) clamped). Local smoke (2 folds, 3 ep, 1s): flatten -0.049,
+  cnn +0.032; coverage 0.90->0.95 after calibration (works).
+SUPERSEDES the earlier deterministic frozen-split map result (docs/tactile_map_results.csv). Full CV
+run to be done on CRC GPU (qsub train_tactile_map_gpu.job) with all data + 80 epochs, then pull the
+CSV + plot locally.

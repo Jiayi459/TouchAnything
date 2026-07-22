@@ -9,7 +9,7 @@
 # Submit from repo root after `git pull` and `mkdir -p logs`:
 #   qsub scripts/crc/train_tactile_map_gpu.job
 #   qsub -v EPOCHS=80 scripts/crc/train_tactile_map_gpu.job
-# Training + export only (npz). SCORING (statsmodels/pyarrow) is done locally after pulling runs/.
+# 5-fold probabilistic CV -> docs/tactile_map_cv_results.csv (skill + coverage). Plot locally.
 # NOTE: no inline comments on #$ lines.
 #$ -M jhao3@nd.edu
 #$ -m abe
@@ -36,9 +36,10 @@ echo "linked $n clip_*.npy into data/actionsense_states/"
 
 python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
 
-python scripts/train_tactile_map.py --epochs "${EPOCHS:-80}"
+python scripts/train_tactile_map.py --epochs "${EPOCHS:-80}" --folds "${FOLDS:-5}"
 
 echo ""
-echo "[done] predictions -> runs/tactile_map/preds_<enc>_<hist>s.npz"
-echo "Pull to local + score:  rsync -avz jhao3@crcfe01.crc.nd.edu:~/TouchAnything/runs/tactile_map/ ./runs/tactile_map/"
-echo "  then locally:  python scripts/plot_tactile_map.py   (scores via the harness + writes plots)"
+echo "[done] 5-fold CV skill + coverage -> docs/tactile_map_cv_results.csv"
+echo "Pull to local + plot:"
+echo "  scp -J jhao3@bastion.crc.nd.edu jhao3@crcfe01.crc.nd.edu:~/TouchAnything/docs/tactile_map_cv_results.csv docs/"
+echo "  python scripts/plot_tactile_map.py"

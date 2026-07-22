@@ -42,19 +42,26 @@ class CNNEncoder(nn.Module):
 
 
 class Seq2Seq(nn.Module):
-    """encoder -> GRU over t_in frames -> one-shot direct head -> (B,H,6)."""
+    """encoder -> GRU over t_in frames -> one-shot PROBABILISTIC head -> (mu, logvar), each (B,H,6).
+
+    Predicts the RESIDUAL (change vs the last observed value) as a Gaussian per (step, channel):
+    mean mu + log-variance lv. Trained with Gaussian NLL; lv clamped for stability."""
 
     def __init__(self, encoder: nn.Module, d: int, hidden: int, horizon: int, n_out: int = 6):
         super().__init__()
         self.encoder = encoder
         self.gru = nn.GRU(d, hidden, batch_first=True)
-        self.head = nn.Linear(hidden, horizon * n_out)
+        self.mu = nn.Linear(hidden, horizon * n_out)
+        self.lv = nn.Linear(hidden, horizon * n_out)
         self.H, self.n_out = horizon, n_out
 
     def forward(self, x):
         e = self.encoder(x)                       # (B,t_in,d)
         _, h = self.gru(e)                        # h: (1,B,hidden)
-        return self.head(h[-1]).reshape(-1, self.H, self.n_out)   # (B,H,6)
+        last = h[-1]
+        mu = self.mu(last).reshape(-1, self.H, self.n_out)
+        lv = self.lv(last).clamp(-6, 4).reshape(-1, self.H, self.n_out)
+        return mu, lv                             # (B,H,6), (B,H,6)
 
 
 def build_model(encoder: str, horizon: int, d: int = 64, hidden: int = 64) -> Seq2Seq:

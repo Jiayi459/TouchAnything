@@ -87,8 +87,9 @@ def test_baseline_first_n_only(tmp_path):
 @pytest.mark.parametrize("enc", ["flatten", "cnn"])
 def test_model_shape(enc):
     m = build_model(enc, horizon=10, d=32, hidden=32)
-    y = m(torch.randn(2, 7, 2, 32, 32))
-    assert y.shape == (2, 10, 6)
+    mu, lv = m(torch.randn(2, 7, 2, 32, 32))          # probabilistic: (mean, log-variance)
+    assert mu.shape == lv.shape == (2, 10, 6)
+    assert lv.min() >= -6 - 1e-4 and lv.max() <= 4 + 1e-4   # clamped
 
 
 # --- (viii) residual-over-persistence target = future - last observed value ---

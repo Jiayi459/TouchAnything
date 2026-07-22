@@ -1634,3 +1634,17 @@ the server bastion.crc.nd.edu as your login host"):
      Automated by ~/.ssh/config Host `crc` (ProxyJump bastion) -> just `ssh crc`.
 The earlier timeout was: off-campus WITHOUT VPN and using the direct command -> blocked; use A or B.
 Auth: NetID password + Google Authenticator 2FA (Okta/authenticator) at the prompt(s).
+
+### OVERFITTING CHECK (2026-07-22) — F/CoP probGRU overfits badly at 80 epochs (no early stopping)
+scripts/plot_fcop_loss_curve.py: reuses action_dynamics (load_pooled/Norm/windows/ProbGRU + NLL),
+splits clips 70/15/15, logs train/val/test NLL + MSE per epoch. Config raw/right/3s, 80 epochs.
+FINDING (docs/fcop_loss_curve.png): classic overfitting on BOTH metrics.
+  MSE (mean, drives skill): min-val @epoch 10 (0.729) -> rises to 0.937 by epoch 80 (train 0.430).
+  NLL (mean+variance):      min-val @epoch 10 (0.220) -> rises to ~1.0 by epoch 80 (train -0.236).
+  val & test track each other closely (no distribution mismatch); both diverge from train after ~ep 10.
+IMPLICATION: action_dynamics.train runs 80 epochs and returns the FINAL model (NO early stopping) ->
+the F/CoP sweep results (docs/action_dynamics_results.csv, the +0.40 skills) come from OVERFIT models;
+early stopping at ~epoch 10 would improve skill AND calibration. The NEW tactile_map train.py already
+early-stops (keeps best-val), so the CRC tactile-map CV run is NOT affected -- only the old probGRU is.
+RECOMMENDATION: add early stopping (keep best-val weights) to action_dynamics.train + re-run the F/CoP
+sweep; or lower epochs to ~15-20. (Login methods already documented above, commit e22231f/prior.)

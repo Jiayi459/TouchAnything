@@ -1,0 +1,44 @@
+#!/bin/bash
+# UGE job: train the tactile-MAP -> F/CoP forecaster sweep (flatten + CNN x history {1,3,10 s}) on
+# ND CRC GPU. Same model/target/split/harness as the local run, just full training on GPU + all data.
+#
+# Prereqs on CRC (once): the raw maps must exist at ~/actionsense/states/clip_*.npy (from
+# scripts/crc/stream_actionsense.sh with --save-clips-for "Pour,Slice,Peel"). state_N.npy + manifest
+# + splits.json are already committed in the repo. This job SYMLINKS the clips into the repo data dir.
+#
+# Submit from repo root after `git pull` and `mkdir -p logs`:
+#   qsub scripts/crc/train_tactile_map_gpu.job
+#   qsub -v EPOCHS=80 scripts/crc/train_tactile_map_gpu.job
+# Training + export only (npz). SCORING (statsmodels/pyarrow) is done locally after pulling runs/.
+# NOTE: no inline comments on #$ lines.
+#$ -M jhao3@nd.edu
+#$ -m abe
+#$ -q gpu
+#$ -l gpu_card=1
+#$ -pe smp 4
+#$ -N tactile_map
+#$ -cwd
+#$ -o logs/
+#$ -e logs/
+
+set -euo pipefail
+conda activate tactile
+
+# CLI needs pyyaml/numpy/torch (torch has CUDA in this env); scoring deps are NOT needed here.
+python -c "import yaml" 2>/dev/null || pip install pyyaml --quiet
+
+# The raw pressure maps live in ~/actionsense/states after streaming; make them visible to the repo
+# data dir (state_N.npy + manifest.jsonl + splits.json are already committed there).
+mkdir -p data/actionsense_states
+n=0
+for f in "$HOME"/actionsense/states/clip_*.npy; do ln -sf "$f" data/actionsense_states/ && n=$((n+1)); done
+echo "linked $n clip_*.npy into data/actionsense_states/"
+
+python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
+
+python scripts/train_tactile_map.py --epochs "${EPOCHS:-80}"
+
+echo ""
+echo "[done] predictions -> runs/tactile_map/preds_<enc>_<hist>s.npz"
+echo "Pull to local + score:  rsync -avz jhao3@crcfe01.crc.nd.edu:~/TouchAnything/runs/tactile_map/ ./runs/tactile_map/"
+echo "  then locally:  python scripts/plot_tactile_map.py   (scores via the harness + writes plots)"

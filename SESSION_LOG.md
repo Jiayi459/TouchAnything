@@ -1606,3 +1606,20 @@ action_dynamics protocol onto the tactile-map CNN:
 SUPERSEDES the earlier deterministic frozen-split map result (docs/tactile_map_results.csv). Full CV
 run to be done on CRC GPU (qsub train_tactile_map_gpu.job) with all data + 80 epochs, then pull the
 CSV + plot locally.
+
+### CRC LOGIN — UPDATED (2026-07-22): direct crcfe01 times out off-campus -> use bastion ProxyJump
+Direct `ssh jhao3@crcfe01.crc.nd.edu` times out unless on campus/VPN (crcfe01 is firewalled). FIX:
+always go through the bastion. Set up ONCE in ~/.ssh/config (done on this machine):
+    Host crc
+        HostName crcfe01.crc.nd.edu
+        User jhao3
+        ProxyJump jhao3@bastion.crc.nd.edu
+        ForwardX11 yes
+        ServerAliveInterval 60
+Then simply:
+    ssh crc                                   # front-end via bastion (2FA at bastion, then password)
+    scp crc:~/TouchAnything/docs/x.csv docs/  # copy FROM crc to local (uses the config)
+    scp local docs/x crc:~/TouchAnything/...  # copy TO crc
+Manual equivalent (no config): ssh -Y -J jhao3@bastion.crc.nd.edu jhao3@crcfe01.crc.nd.edu
+Auth: bastion asks for Google Authenticator code, then crcfe01 asks for the NetID password.
+On CRC: conda activate tactile ; cd ~/TouchAnything && git pull.

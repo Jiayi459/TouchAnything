@@ -1563,3 +1563,27 @@ GPU work goes through qsub batch jobs.
 - Repo on CRC: cd ~/TouchAnything && git pull   (fork: github.com/Jiayi459/TouchAnything).
 - Pull results back to local: rsync -avz jhao3@crcfe01.crc.nd.edu:~/TouchAnything/runs/ ./runs/
   (CRC cannot push to GitHub without a PAT; use scp/rsync to move files).
+
+### RESULT (2026-07-22) — tactile-map -> F/CoP: CNN beats flatten (spatial structure helps)
+Full 75-recording map coverage (re-streamed Peel maps from CRC; state_0 identical -> frozen split
+intact). Sweep: 2 encoders x history{1,3,10 s}, 40 epochs, scored on the frozen harness TEST (15/15).
+
+CRITICAL FIX first: absolute-level map models MEAN-REVERTED (pred ~ train-mean, not current level)
+-> deeply negative skill (-1.9..-2.2, worse than persistence). Diagnosed (corr(model,true)=0.78 so
+maps carry signal, but net hedges to mean on a target where persistence is very strong). FIX =
+predict RESIDUAL over persistence (delta vs last observed value; anchor added back at export). At
+worst the model predicts delta=0 -> matches persistence. data.py target = Y[t+1:]-Y[t]; train.export
+adds tnorm-space anchor tn[t]+delta. 9 unit tests pass.
+
+RESIDUAL RESULT (mean skill vs persistence, harness TEST):
+  persistence  0.000 (ref)      ar  +0.180  (still the ceiling; classical AR on aggregates)
+  flatten  1s -0.044  3s -0.030  10s -0.020   (~= persistence; flattening loses the spatial info)
+  cnn      1s +0.054  3s +0.064  10s +0.084   (POSITIVE; beats persistence; rises with history)
+Headlines: (1) CNN > flatten at EVERY history -> the contact-patch SPATIAL STRUCTURE contributes to
+predicting the CHANGE in F/CoP (answers the core question). (2) CNN improves with history (+0.05->+0.08).
+(3) flatten stuck at persistence. (4) AR on aggregates (+0.18) STILL beats map+CNN (+0.08) -> spatial
+structure helps vs flattening but hasn't beaten the strong aggregate baseline yet.
+Artifacts: docs/tactile_map_results.csv (9 models, tidy), docs/tactile_map_skill_vs_history.png,
+docs/tactile_map_skill_bars.png, scripts/plot_tactile_map.py. Ran on CPU locally (~25 min/sweep;
+models tiny). NEXT ideas: give CNN more capacity / combine map+aggregate (hybrid) to try to beat AR;
+probabilistic head; or CRC GPU for a bigger sweep.

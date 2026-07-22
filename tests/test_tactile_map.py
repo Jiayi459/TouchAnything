@@ -91,6 +91,17 @@ def test_model_shape(enc):
     assert y.shape == (2, 10, 6)
 
 
+# --- (viii) residual-over-persistence target = future - last observed value ---
+def test_residual_target():
+    cfg = make_cfg(horizon=3, min_history=5); t_in = 4
+    M = rand_maps(40, 1)[0]
+    Y = np.cumsum(np.random.default_rng(0).standard_normal((40, 6)), 0).astype(np.float32)
+    ds = D.MapWindows({0: M}, {0: Y}, cfg, t_in)
+    k = 3; i, t = ds.index[k]
+    _, y = ds[k]
+    assert np.allclose(y.numpy(), Y[t + 1:t + 1 + cfg.horizon] - Y[t], atol=1e-5)
+
+
 # --- (vii) integration on a real cached map, if any exist locally ---
 def test_real_map_loads_if_available():
     files = glob.glob("data/actionsense_states/clip_*.npy")

@@ -109,7 +109,9 @@ class MapWindows(Dataset):
     def __getitem__(self, k: int):
         i, t = self.index[k]
         x = self._window(i, t)
-        y = self.tgts[i][t + 1: t + 1 + self.H]                  # (H,6)
+        # RESIDUAL-over-persistence target: the CHANGE from the last observed value Y[t]. At worst
+        # the model predicts 0 and matches persistence; its real job is to predict the delta.
+        y = self.tgts[i][t + 1: t + 1 + self.H] - self.tgts[i][t]     # (H,6)
         return torch.from_numpy(x), torch.from_numpy(y.astype(np.float32))
 
 

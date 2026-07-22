@@ -10,7 +10,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from ..eval_harness.config import Config
-from ..eval_harness.dataset import Norm
+from ..eval_harness.dataset import Norm, load_target
 from ..eval_harness.splits import load_splits
 from . import data as D
 from .models import build_model
@@ -77,15 +77,18 @@ def export(model, mnorm: "D.MapNorm", tnorm: Norm, cfg: Config, tm: dict, t_in: 
     dev = next(model.parameters()).device
     out = {}
     for i in idxs:
+        tn = tnorm.z(load_target(cfg, i))                     # (T,6) normalized target
         mn = mnorm.apply(D.load_map(cfg, i, tm["baseline_frames"]))
+        n = min(len(tn), len(mn)); tn, mn = tn[:n], mn[:n]    # share the time axis
         X, ors = D.recording_windows(mn, cfg, t_in)
         if len(ors) == 0:
             continue
-        preds = []
+        deltas = []
         for s in range(0, len(X), batch):
             xb = torch.from_numpy(X[s:s + batch]).to(dev)
-            preds.append(model(xb).cpu().numpy())
-        out[i] = tnorm.unz(np.concatenate(preds, 0))          # (n_origins, H, 6) raw units
+            deltas.append(model(xb).cpu().numpy())            # normalized RESIDUAL
+        anchor = tn[ors][:, None, :]                          # (n,1,6) last observed value (normalized)
+        out[i] = tnorm.unz(anchor + np.concatenate(deltas, 0))   # persistence + delta -> raw units
     return out
 
 

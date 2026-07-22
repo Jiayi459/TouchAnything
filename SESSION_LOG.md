@@ -1623,3 +1623,14 @@ Then simply:
 Manual equivalent (no config): ssh -Y -J jhao3@bastion.crc.nd.edu jhao3@crcfe01.crc.nd.edu
 Auth: bastion asks for Google Authenticator code, then crcfe01 asks for the NetID password.
 On CRC: conda activate tactile ; cd ~/TouchAnything && git pull.
+
+### CRC LOGIN — AUTHORITATIVE (2026-07-22, per docs.crc.nd.edu/new_user/connecting_to_crc.html)
+Destination is ALWAYS the front-end crcfe01/crcfe02.crc.nd.edu. Off-campus you MUST tunnel, two
+OFFICIAL ways (docs quote: off-campus "first need to connect to the campus VPN"; alternative "use
+the server bastion.crc.nd.edu as your login host"):
+  A) ND VPN then direct: connect ND campus VPN (ND OIT / vpn.nd.edu) -> `ssh -Y jhao3@crcfe01.crc.nd.edu`
+     (this is the plain "previous" command; it only works on-campus or on VPN).
+  B) Bastion (no VPN): `ssh -Y -J jhao3@bastion.crc.nd.edu jhao3@crcfe01.crc.nd.edu`
+     Automated by ~/.ssh/config Host `crc` (ProxyJump bastion) -> just `ssh crc`.
+The earlier timeout was: off-campus WITHOUT VPN and using the direct command -> blocked; use A or B.
+Auth: NetID password + Google Authenticator 2FA (Okta/authenticator) at the prompt(s).

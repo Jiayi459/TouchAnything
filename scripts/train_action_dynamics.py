@@ -35,7 +35,8 @@ def cross_validate(data, n_act, t_in, t_out, folds, hidden, epochs, seed):
         r2 = np.random.default_rng(seed * 100 + f)
         idx = r2.permutation(len(tr)); nv = max(2, len(tr) // 6)
         val = [tr[i] for i in idx[:nv]]; trn = [tr[i] for i in idx[nv:]]
-        m, norm = AD.train(trn, n_act, t_in, t_out, hidden=hidden, epochs=epochs, seed=seed)
+        m, norm = AD.train(trn, n_act, t_in, t_out, hidden=hidden, epochs=epochs, seed=seed,
+                           val_clips=val)                       # early-stop on VAL (fixes overfitting)
         s = AD.calibrate_sigma(m, norm, val, t_in, t_out)          # fit on VAL
         sk_t, sk_s, _, c_raw = AD.evaluate(m, norm, te, t_in, t_out, sigma_scale=1.0)
         _, _, _, c_cal = AD.evaluate(m, norm, te, t_in, t_out, sigma_scale=s)   # report on TEST
@@ -106,8 +107,8 @@ def main():
                 r3 = np.random.default_rng(args.seed + 7)
                 idx = r3.permutation(len(data)); nv = max(2, len(data) // 6)
                 val = [data[i] for i in idx[:nv]]; trn = [data[i] for i in idx[nv:]]
-                model, norm = AD.train(trn, n_act, t_in, t_out,
-                                       hidden=args.hidden, epochs=args.epochs, seed=args.seed)
+                model, norm = AD.train(trn, n_act, t_in, t_out, hidden=args.hidden,
+                                       epochs=args.epochs, seed=args.seed, val_clips=val)
                 s = AD.calibrate_sigma(model, norm, val, t_in, t_out)
                 out = os.path.join(args.outdir, f"ad_{'-'.join(subs).lower()}_{mode}_{hand}_p{p:.0f}s.pt")
                 AD.save(out, model, norm, dict(subs=subs, n_act=n_act, t_in=t_in, t_out=t_out,

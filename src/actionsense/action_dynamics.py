@@ -165,21 +165,41 @@ class ProbGRU(nn.Module):
 # --------------------------------------------------------------------------- #
 # Train / evaluate / forecast
 # --------------------------------------------------------------------------- #
-def train(clips, n_act, t_in, t_out, norm=None, hidden=48, epochs=80, lr=3e-3, seed=0):
+def _nll(m, X, A, Yin, Y, norm, t_out):
+    """Mean Gaussian NLL on a window set (for early-stopping model selection)."""
+    with torch.no_grad():
+        mu, lv = m(torch.tensor(norm.nx(X)), torch.tensor(A),
+                   torch.tensor(norm.ny(Yin)[:, -1]), t_out)
+        return float((0.5 * (lv + (torch.tensor(norm.ny(Y)) - mu) ** 2 * torch.exp(-lv))).mean())
+
+
+def train(clips, n_act, t_in, t_out, norm=None, hidden=48, epochs=80, lr=3e-3, seed=0,
+          val_clips=None):
+    """Train the probGRU. If `val_clips` is given, EARLY-STOP: keep the weights with the lowest
+    VAL NLL over training (the loss curve overfits badly after ~epoch 10 without this)."""
     norm = norm or Norm.from_clips(clips)
     X, A, Yin, Y, _ = windows(clips, t_in, t_out, 2)
     xt = torch.tensor(norm.nx(X)); at = torch.tensor(A)
     yl = torch.tensor(norm.ny(Yin)[:, -1]); yt = torch.tensor(norm.ny(Y))
+    Xv = windows(val_clips, t_in, t_out, 2) if val_clips else None
     torch.manual_seed(seed)
     m = ProbGRU(X.shape[-1], n_act, hidden)
     opt = torch.optim.Adam(m.parameters(), lr=lr)
+    best, best_state = float("inf"), None
     for _ in range(epochs):
-        perm = torch.randperm(len(xt))
+        m.train(); perm = torch.randperm(len(xt))
         for i in range(0, len(xt), 64):
             b = perm[i:i + 64]; opt.zero_grad()
             mu, lv = m(xt[b], at[b], yl[b], t_out)
             (0.5 * (lv + (yt[b] - mu) ** 2 * torch.exp(-lv)).mean()).backward()
             opt.step()
+        if Xv is not None and len(Xv[0]):                       # early-stopping check on VAL
+            m.eval()
+            v = _nll(m, Xv[0], Xv[1], Xv[2], Xv[3], norm, t_out)
+            if v < best:
+                best, best_state = v, {k: t.clone() for k, t in m.state_dict().items()}
+    if best_state is not None:
+        m.load_state_dict(best_state)
     return m, norm
 
 

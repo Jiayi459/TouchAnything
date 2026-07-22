@@ -1557,7 +1557,7 @@ NetID = jhao3. UGE scheduler (qsub/qstat/qrsh). Front-end has NO GPU (torch.cuda
 GPU work goes through qsub batch jobs.
 - On campus / ND VPN:      ssh -Y jhao3@crcfe01.crc.nd.edu     (crcfe02 also works)
 - Off campus (no VPN):     ssh -Y jhao3@bastion.crc.nd.edu     then on bastion:  ssh crcfe01
-- Auth: NetID password + 2FA (Google Authenticator passcode, per account setup).
+- Auth: NetID password + 2FA (donGoogle Authenticator passcode, per account setup).
 - Passwordless (optional): ssh-keygen -t ed25519 ; ssh-copy-id jhao3@crcfe01.crc.nd.edu (2FA may still apply).
 - After login: echo $0 ; if not bash -> run `bash` ; then `conda activate tactile`.
 - Repo on CRC: cd ~/TouchAnything && git pull   (fork: github.com/Jiayi459/TouchAnything).
@@ -1648,3 +1648,15 @@ early stopping at ~epoch 10 would improve skill AND calibration. The NEW tactile
 early-stops (keeps best-val), so the CRC tactile-map CV run is NOT affected -- only the old probGRU is.
 RECOMMENDATION: add early stopping (keep best-val weights) to action_dynamics.train + re-run the F/CoP
 sweep; or lower epochs to ~15-20. (Login methods already documented above, commit e22231f/prior.)
+
+### OVERFITTING FIXED (2026-07-22) — early stopping in action_dynamics.train
+Added early stopping: train(..., val_clips=) keeps the lowest-VAL-NLL weights (over all epochs);
+cross_validate + the final-model path pass the val subset. No leakage (split by clip; norm train-only).
+DEMONSTRATION (raw/right/3s, same 70/15/15 clip split, 80 epochs, held-out TEST):
+  early-stop (best-val):  TEST mean skill +0.546, coverage 0.93  (per-ch F/x/y 0.54/0.55/0.54)
+  overfit (80ep final):   TEST mean skill +0.401, coverage 0.81  (per-ch 0.30/0.49/0.42)
+=> early stopping lifts skill +0.40->+0.55 (~36% rel) AND calibration 0.81->0.93; the force channel
+(most overfit) recovers most (0.30->0.54). The old F/CoP sweep numbers (docs/action_dynamics_results.csv)
+were depressed by overfitting. TODO: re-run the full F/CoP sweep with early stopping to refresh the CSV.
+Baselines reminder: persistence = last-value (skill-0 reference, per-split); linear AR (harness, raw
+6-dim) = +0.18 mean skill (best right-CoP-x +0.25). Split confirmed leak-free (by clip, norm train-only).

@@ -1702,3 +1702,10 @@ history was only losing because more input -> more overfitting without early sto
 NOTE: these probGRU skills are vs persistence-of-fast on the FAST 3-dim 1-hand target -- NOT directly
 comparable to the harness AR (+0.18, raw 6-dim target). docs/action_dynamics_results_earlystop.csv is the
 honest result; docs/action_dynamics_results.csv (overfit) kept for the before/after diff.
+
+### BEFORE/AFTER early-stopping loss figure (2026-07-23)
+docs/fcop_earlystop_comparison.png (raw/right/3s): same loss curve, two DEPLOYED checkpoints marked.
+AFTER early-stop (deploy min-val ep10): test NLL 0.217, test MSE 0.737. BEFORE (deploy final ep80):
+test NLL 1.036, test MSE 0.951. Early stopping recovers +0.818 NLL / +0.215 MSE on the held-out test
+by deploying the min-val checkpoint instead of the overfit final one. (Early stopping = checkpoint
+selection; the training trajectory is identical -- one curve, different deployed point.)

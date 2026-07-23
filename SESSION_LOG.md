@@ -1733,3 +1733,24 @@ KEY POINTS:
    the weak-persistence illusion. Early stopping (0.737) gives genuine skill (+0.25 R^2).
 SEPARATE CONTEXT: the harness AR on the RAW 6-dim both-hands target = +0.18 skill vs persistence -- a
 DIFFERENT target/scale, not comparable to the fast-target MSEs above.
+
+### DEFINITIVE COMPARISON (2026-07-23) — forecasting the raw 6-dim F/CoP, all same target/split/protocol
+Added aggregate-F/CoP encoder (neural AR: GRU on the 6-dim history) scored by the same 5-fold
+probabilistic CV as the map models. FOUR-WAY mean skill vs persistence (docs/forecaster_comparison.png):
+  history | linear-AR | GRU-aggregate | CNN-map | flatten-map | persistence
+     1s   |  +0.180   |   +0.120      | +0.052  |  -0.040     |   0
+     3s   |  +0.180   |   +0.138      | +0.050  |  -0.025     |   0
+    10s   |  +0.180   |   +0.142      | +0.063  |  -0.026     |   0
+RANKING: linear AR > GRU-aggregate > CNN-map > flatten-map > persistence.
+CONCLUSIONS:
+ 1. LINEAR AR IS BEST. Neither nonlinearity (GRU) nor a richer input (map) beats a simple per-channel
+    linear autoregression on the raw F/CoP -- these dynamics are essentially linear-autoregressive.
+ 2. THE MAP IS AN INFERIOR INPUT to the aggregate for THIS target: map models (+0.05-0.06) << aggregate
+    models (+0.12-0.14). Going through the pixel representation loses info -- the net must reconstruct
+    the aggregate (F=sum, CoP=centroid) from pixels imperfectly.
+ 3. WITHIN the map, spatial structure still helps (CNN +0.05 > flatten -0.03) -- consistent with the
+    earlier finding -- but not enough to reach the aggregate, let alone AR.
+ 4. GRU-aggregate improves slightly with history (+0.12->+0.14) then plateaus, still below AR.
+Coverage ~0.94-0.95 (calibrated) for all learned models. Fast-component probGRU (action_dynamics)
+kept separate/untouched. Artifacts: docs/forecaster_comparison.png, tactile_map_cv_results_aggregate.csv,
+scripts/plot_forecaster_comparison.py.

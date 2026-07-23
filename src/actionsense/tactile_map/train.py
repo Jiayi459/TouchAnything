@@ -32,22 +32,49 @@ def _dataset(cfg, tm, t_in, idxs, mnorm, tnorm):
     return D.MapWindows(D.normalize(maps, mnorm), {i: tnorm.z(t) for i, t in tgts.items()}, cfg, t_in)
 
 
-def train_model(train_ds, val_ds, cfg: Config, encoder: str, tm: dict, seed: int = 0):
-    """Train one probabilistic model (Gaussian NLL); keep best-VAL-NLL weights."""
+def _materialize(ds):
+    """Stack a whole (small) dataset into (X, Y) tensors once -- avoids per-epoch DataLoader overhead."""
+    items = [ds[k] for k in range(len(ds))]
+    return torch.stack([a for a, _ in items]), torch.stack([b for _, b in items])
+
+
+def train_model(train_ds, val_ds, cfg: Config, encoder: str, tm: dict, seed: int = 0,
+                materialize: bool = False):
+    """Train one probabilistic model (Gaussian NLL); keep best-VAL-NLL weights. `materialize`=True
+    stacks the data into tensors once (fast for the tiny aggregate model on CPU); the map path keeps
+    the lazy DataLoader (a 10 s map window set would be tens of GB)."""
     torch.manual_seed(seed)
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     model = build_model(encoder, cfg.horizon, tm["d"], tm["hidden"]).to(dev)
-    opt = torch.optim.Adam(model.parameters(), lr=tm["lr"])
-    tl = DataLoader(train_ds, batch_size=tm["batch"], shuffle=True)
+    opt = torch.optim.Adam(model.parameters(), lr=tm["lr"]); bs = tm["batch"]
+    if materialize:
+        Xtr, Ytr = _materialize(train_ds); Xtr, Ytr = Xtr.to(dev), Ytr.to(dev)
+        Xva = Yva = None
+        if len(val_ds):
+            Xva, Yva = _materialize(val_ds); Xva, Yva = Xva.to(dev), Yva.to(dev)
+    else:
+        tl = DataLoader(train_ds, batch_size=bs, shuffle=True)
     best, best_state = np.inf, None
     for _ in range(tm["epochs"]):
         model.train()
-        for x, y in tl:
-            x, y = x.to(dev), y.to(dev)
-            mu, lv = model(x)
-            loss = 0.5 * (lv + (y - mu) ** 2 * torch.exp(-lv)).mean()      # Gaussian NLL on residual
-            opt.zero_grad(); loss.backward(); opt.step()
-        v = _val_nll(model, val_ds, dev) if len(val_ds) else float(loss.item())
+        if materialize:
+            perm = torch.randperm(len(Xtr))
+            for i in range(0, len(Xtr), bs):
+                b = perm[i:i + bs]; mu, lv = model(Xtr[b])
+                loss = 0.5 * (lv + (Ytr[b] - mu) ** 2 * torch.exp(-lv)).mean()
+                opt.zero_grad(); loss.backward(); opt.step()
+            with torch.no_grad():
+                if Xva is not None:
+                    mu, lv = model(Xva)
+                    v = float((0.5 * (lv + (Yva - mu) ** 2 * torch.exp(-lv))).mean())
+                else:
+                    v = float(loss.item())
+        else:
+            for x, y in tl:
+                x, y = x.to(dev), y.to(dev); mu, lv = model(x)
+                loss = 0.5 * (lv + (y - mu) ** 2 * torch.exp(-lv)).mean()      # Gaussian NLL on residual
+                opt.zero_grad(); loss.backward(); opt.step()
+            v = _val_nll(model, val_ds, dev) if len(val_ds) else float(loss.item())
         if v < best:
             best, best_state = v, {k: t.cpu().clone() for k, t in model.state_dict().items()}
     if best_state:
@@ -123,7 +150,8 @@ def cross_validate(cfg: Config, tm: dict, encoder: str, t_in: int, recs: list[in
                                     {i: tnorm.z(t) for i, t in tgts_tr.items()}, cfg, t_in)
             val_ds = _dataset(cfg, tm, t_in, val, mnorm, tnorm)
             test_ds = _dataset(cfg, tm, t_in, te, mnorm, tnorm)
-        model = train_model(train_ds, val_ds, cfg, encoder, tm, seed=seed)
+        model = train_model(train_ds, val_ds, cfg, encoder, tm, seed=seed,
+                            materialize=(encoder == "aggregate"))
         s = calibrate_sigma(model, val_ds)
         sk_ch, sk_step, c_raw = evaluate(model, test_ds, sigma_scale=1.0)
         _, _, c_cal = evaluate(model, test_ds, sigma_scale=s)

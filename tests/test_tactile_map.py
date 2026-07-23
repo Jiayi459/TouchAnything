@@ -92,6 +92,18 @@ def test_model_shape(enc):
     assert lv.min() >= -6 - 1e-4 and lv.max() <= 4 + 1e-4   # clamped
 
 
+def test_aggregate_model_and_windows():
+    m = build_model("aggregate", horizon=10, d=32, hidden=32)
+    mu, lv = m(torch.randn(2, 7, 6))                  # aggregate input: (B, t_in, 6)
+    assert mu.shape == lv.shape == (2, 10, 6)
+    cfg = make_cfg(horizon=3, min_history=5); t_in = 4
+    S = np.cumsum(np.random.default_rng(0).standard_normal((40, 6)), 0).astype(np.float32)
+    ds = D.AggWindows({0: S}, cfg, t_in)
+    x, y = ds[3]; i, t = ds.index[3]
+    assert x.shape == (t_in, 6) and y.shape == (3, 6)
+    assert np.allclose(y.numpy(), S[t + 1:t + 4] - S[t], atol=1e-5)   # residual-over-persistence
+
+
 # --- (viii) residual-over-persistence target = future - last observed value ---
 def test_residual_target():
     cfg = make_cfg(horizon=3, min_history=5); t_in = 4

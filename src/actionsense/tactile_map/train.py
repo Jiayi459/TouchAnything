@@ -112,12 +112,17 @@ def cross_validate(cfg: Config, tm: dict, encoder: str, t_in: int, recs: list[in
         r2 = np.random.default_rng(seed * 100 + f)
         idx = r2.permutation(len(tr)); nv = max(2, len(tr) // 6)
         val, trn = [tr[i] for i in idx[:nv]], [tr[i] for i in idx[nv:]]
-        maps_tr, tgts_tr = D.load_raw(cfg, trn, tm["baseline_frames"])
-        mnorm = D.MapNorm.from_train(maps_tr, tm["alpha"]); tnorm = Norm.from_train(tgts_tr)
-        train_ds = D.MapWindows(D.normalize(maps_tr, mnorm),
-                                {i: tnorm.z(t) for i, t in tgts_tr.items()}, cfg, t_in)
-        val_ds = _dataset(cfg, tm, t_in, val, mnorm, tnorm)
-        test_ds = _dataset(cfg, tm, t_in, te, mnorm, tnorm)
+        if encoder == "aggregate":                          # neural AR on the aggregate 6-dim F/CoP
+            tnorm = Norm.from_train({i: load_target(cfg, i) for i in trn})
+            mk = lambda ids: D.AggWindows({i: tnorm.z(load_target(cfg, i)) for i in ids}, cfg, t_in)  # noqa: E731
+            train_ds, val_ds, test_ds = mk(trn), mk(val), mk(te)
+        else:                                               # map input (flatten / cnn)
+            maps_tr, tgts_tr = D.load_raw(cfg, trn, tm["baseline_frames"])
+            mnorm = D.MapNorm.from_train(maps_tr, tm["alpha"]); tnorm = Norm.from_train(tgts_tr)
+            train_ds = D.MapWindows(D.normalize(maps_tr, mnorm),
+                                    {i: tnorm.z(t) for i, t in tgts_tr.items()}, cfg, t_in)
+            val_ds = _dataset(cfg, tm, t_in, val, mnorm, tnorm)
+            test_ds = _dataset(cfg, tm, t_in, te, mnorm, tnorm)
         model = train_model(train_ds, val_ds, cfg, encoder, tm, seed=seed)
         s = calibrate_sigma(model, val_ds)
         sk_ch, sk_step, c_raw = evaluate(model, test_ds, sigma_scale=1.0)

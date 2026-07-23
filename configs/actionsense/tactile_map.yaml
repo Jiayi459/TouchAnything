@@ -17,7 +17,9 @@ optim:
   seed: 0
 
 sweep:
-  encoders: [flatten, cnn]
+  # aggregate = neural AR on the 6-dim F/CoP (no map); flatten/cnn = map encoders. All predict the
+  # SAME raw 6-dim target and are scored the same way -> directly comparable (and to the harness AR).
+  encoders: [aggregate, flatten, cnn]
   histories_s: [1, 3, 10]   # input history t_in in seconds -> {10, 30, 100} frames @ 10 Hz
 
 paths:

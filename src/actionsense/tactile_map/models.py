@@ -41,6 +41,18 @@ class CNNEncoder(nn.Module):
         return self.conv(x.reshape(B * T, IN_CH, GRID, GRID)).reshape(B, T, -1)
 
 
+class AggEncoder(nn.Module):
+    """Per-frame projection of the aggregate 6-dim F/CoP -> embedding. The neural (GRU) counterpart
+    of the linear AR baseline: same raw 6-dim target, but input is the aggregate F/CoP history (no map)."""
+
+    def __init__(self, d: int, n_in: int = 6):
+        super().__init__()
+        self.proj = nn.Sequential(nn.Linear(n_in, d), nn.ReLU())
+
+    def forward(self, x):                         # (B,t_in,6) -> (B,t_in,d)
+        return self.proj(x)
+
+
 class Seq2Seq(nn.Module):
     """encoder -> GRU over t_in frames -> one-shot PROBABILISTIC head -> (mu, logvar), each (B,H,6).
 
@@ -65,5 +77,5 @@ class Seq2Seq(nn.Module):
 
 
 def build_model(encoder: str, horizon: int, d: int = 64, hidden: int = 64) -> Seq2Seq:
-    enc = {"flatten": FlattenEncoder, "cnn": CNNEncoder}[encoder](d)
+    enc = {"flatten": FlattenEncoder, "cnn": CNNEncoder, "aggregate": AggEncoder}[encoder](d)
     return Seq2Seq(enc, d, hidden, horizon)

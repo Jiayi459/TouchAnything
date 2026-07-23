@@ -115,6 +115,32 @@ class MapWindows(Dataset):
         return torch.from_numpy(x), torch.from_numpy(y.astype(np.float32))
 
 
+class AggWindows(Dataset):
+    """Aggregate-F/CoP input: past 6-dim history -> residual future 6-dim (same signal, autoregressive
+    -- the neural AR). `sig_n` maps idx -> (T,6) already-normalized F/CoP. Left-pads early origins with
+    zeros; residual-over-persistence target, identical convention to MapWindows."""
+
+    def __init__(self, sig_n: dict[int, np.ndarray], cfg: Config, t_in: int):
+        self.sig, self.t_in, self.H = sig_n, t_in, cfg.horizon
+        self.index = [(i, int(t)) for i in sorted(sig_n) for t in origins(len(sig_n[i]), cfg)]
+
+    def __len__(self):
+        return len(self.index)
+
+    def _window(self, i: int, t: int) -> np.ndarray:
+        S = self.sig[i]
+        w = S[max(t - self.t_in + 1, 0): t + 1]
+        if w.shape[0] < self.t_in:
+            w = np.concatenate([np.zeros((self.t_in - w.shape[0], 6), np.float32), w], 0)
+        return w
+
+    def __getitem__(self, k: int):
+        i, t = self.index[k]
+        x = self._window(i, t)
+        y = self.sig[i][t + 1: t + 1 + self.H] - self.sig[i][t]      # residual over persistence
+        return torch.from_numpy(x.astype(np.float32)), torch.from_numpy(y.astype(np.float32))
+
+
 def recording_windows(map_n: np.ndarray, cfg: Config, t_in: int) -> tuple[np.ndarray, np.ndarray]:
     """For export: all (n_origins, t_in, 2,32,32) windows of one recording + the origin indices."""
     ors = origins(len(map_n), cfg)

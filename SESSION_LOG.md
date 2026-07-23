@@ -1688,3 +1688,17 @@ spatial inductive bias extracts a little GENERALIZABLE signal before overfitting
 once. Modest CV skill (+0.05-0.06) reflects DATA SCARCITY, not encoder failure; early stopping (CV keeps
 best-val) is essential (else val NLL ~1.3-1.4 by ep60). NEXT to widen the CNN lead: more data
 (activities/subjects), regularization (dropout/weight-decay/smaller d), or glove augmentation.
+
+### F/CoP EARLY-STOPPED SWEEP (2026-07-23, CRC) — cross-validated, big improvement + corrects a finding
+Pulled runs/action_dynamics_results.csv -> docs/action_dynamics_results_earlystop.csv. Compared to the
+OLD overfit docs/action_dynamics_results.csv (mean skill vs persistence-of-fast, 5-fold CV):
+  Early stopping improved skill in EVERY config by +0.10..+0.23. Examples:
+    raw/right 1s   +0.410 -> +0.513   highpass/right 3s +0.369 -> +0.519   raw/left 10s +0.219 -> +0.449
+  New best ~+0.51-0.52 (right hand), ~+0.46 (left). Coverage stayed ~0.94-0.95 (calibration handled both).
+CORRECTION: the earlier "more history HURTS" finding was an OVERFITTING ARTIFACT. Old: skill fell with
+history (right 1s +0.41 -> 10s +0.31). New (early-stopped): skill is ~FLAT across history (right 1s +0.51
+-> 10s +0.50); the gain is LARGEST at 10s (+0.18..+0.23), exactly where overfitting was worst. So longer
+history was only losing because more input -> more overfitting without early stopping.
+NOTE: these probGRU skills are vs persistence-of-fast on the FAST 3-dim 1-hand target -- NOT directly
+comparable to the harness AR (+0.18, raw 6-dim target). docs/action_dynamics_results_earlystop.csv is the
+honest result; docs/action_dynamics_results.csv (overfit) kept for the before/after diff.

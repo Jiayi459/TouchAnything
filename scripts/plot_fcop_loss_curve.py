@@ -102,11 +102,20 @@ def main():
                                  (axes[1], "mse", be_mse, "MSE of the MEAN (drives skill)")]:
         for k, c in [("train", "C0"), ("val", "C1"), ("test", "C2")]:
             ax.plot(ep, H[metric][k], color=c, lw=2, label=f"{k}")
-        ax.axvline(be + 1, color="0.6", ls=":", lw=1, label=f"min-val epoch {be + 1}")
-        ax.set_xlabel("epoch"); ax.set_ylabel(ylab); ax.legend(); ax.grid(alpha=.3)
+        te_es, te_fin = H[metric]["test"][be], H[metric]["test"][-1]      # deployed test loss
+        ax.axvline(be + 1, color="0.5", ls=":", lw=1)
+        ax.plot(be + 1, te_es, "o", color="k", ms=8, zorder=5,
+                label=f"AFTER early-stop (deploy ep{be + 1}): test={te_es:.3f}")
+        ax.plot(args.epochs, te_fin, "X", color="C3", ms=10, zorder=5,
+                label=f"BEFORE (deploy final ep{args.epochs}): test={te_fin:.3f}")
+        ax.annotate("", xy=(args.epochs, te_es), xytext=(args.epochs, te_fin),
+                    arrowprops=dict(arrowstyle="<-", color="C3", lw=1.5))
+        ax.text(args.epochs * 0.78, (te_es + te_fin) / 2,
+                f"early stopping\nrecovers {te_fin - te_es:+.3f}", color="C3", fontsize=9, va="center")
+        ax.set_xlabel("epoch"); ax.set_ylabel(ylab); ax.legend(fontsize=8); ax.grid(alpha=.3)
         ax.set_title(metric.upper())
-    fig.suptitle(f"F/CoP probGRU loss vs epoch  ({args.input_mode}/{args.hand}, {args.history:.0f}s hist) "
-                 f"— train drops, val/test rise after ~epoch {be_nll + 1} => OVERFITTING", fontsize=12)
+    fig.suptitle(f"F/CoP probGRU: BEFORE vs AFTER early stopping  ({args.input_mode}/{args.hand}, "
+                 f"{args.history:.0f}s hist) — same curve, different DEPLOYED checkpoint", fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.95]); os.makedirs(os.path.dirname(args.out), exist_ok=True)
     fig.savefig(args.out, dpi=120); print(f"[done] {args.out}")
 

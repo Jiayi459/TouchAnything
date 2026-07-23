@@ -1709,3 +1709,27 @@ AFTER early-stop (deploy min-val ep10): test NLL 0.217, test MSE 0.737. BEFORE (
 test NLL 1.036, test MSE 0.951. Early stopping recovers +0.818 NLL / +0.215 MSE on the held-out test
 by deploying the min-val checkpoint instead of the overfit final one. (Early stopping = checkpoint
 selection; the training trajectory is identical -- one curve, different deployed point.)
+
+### MSE SUMMARY (2026-07-23) — all models on one scale (raw/right/3s, normalized FAST target, same 70/15/15 split seed 0)
+"var explained" = 1 - MSE/0.978 (0.978 = fast-signal variance = predict-mean MSE) = the HONEST R^2.
+"skill vs pers" = 1 - MSE/1.624 (persistence-of-fast MSE) = the flattering metric.
+
+  model                     | norm test-MSE | skill vs persistence | var explained (R^2)
+  --------------------------|---------------|----------------------|--------------------
+  probGRU early-stop (ep10) |     0.737     |        +0.55         |       +0.25
+  AR (fast target, p=20)    |     0.763     |        +0.53         |       +0.22
+  probGRU overfit (ep80)    |     0.951     |        +0.41         |       +0.03
+  predict-mean (0)          |     0.978     |        +0.40         |        0.00 (= variance)
+  persistence-of-fast       |     1.624     |         0.00         |       -0.66
+
+KEY POINTS:
+1. Persistence-of-fast (1.624) is a WEAK baseline -- WORSE than predicting the mean (0.978) -- because
+   the high-pass component oscillates around 0, so "repeat last fast value" is anti-correlated. So
+   skill-vs-persistence is inflated: even predict-mean scores +0.40.
+2. HONEST metric = variance explained vs the mean: early-stop probGRU +0.25, AR +0.22, overfit +0.03.
+3. The LINEAR AR nearly TIES the probGRU (0.763 vs 0.737, ~3%). The GRU's edge over a simple linear
+   autoregression on the fast target is marginal.
+4. The OVERFIT probGRU (0.951 ~= predict-mean 0.978) had ~ZERO real skill; its flashy +0.41 was entirely
+   the weak-persistence illusion. Early stopping (0.737) gives genuine skill (+0.25 R^2).
+SEPARATE CONTEXT: the harness AR on the RAW 6-dim both-hands target = +0.18 skill vs persistence -- a
+DIFFERENT target/scale, not comparable to the fast-target MSEs above.

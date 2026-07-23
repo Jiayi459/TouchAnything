@@ -1754,3 +1754,14 @@ CONCLUSIONS:
 Coverage ~0.94-0.95 (calibrated) for all learned models. Fast-component probGRU (action_dynamics)
 kept separate/untouched. Artifacts: docs/forecaster_comparison.png, tactile_map_cv_results_aggregate.csv,
 scripts/plot_forecaster_comparison.py.
+
+### RIGOR CHECK (2026-07-23) — GRU-aggregate vs linear AR: same target/input, protocol now matched
+Verified: BOTH use load_target = RAW 6-dim both-hands F/CoP (NOT the fast/high-pass component;
+dataset.py:43-52). GRU-aggregate input=past of load_target, target=future of load_target
+(train.py:143-144, AggWindows); AR operates on the same load_target. Same data (Slice+Peel, 75 recs),
+same autoregressive input representation. THE ONE MISMATCH: the four-way plot's AR (+0.180) came from
+the FROZEN split (harness fit_and_forecast on splits.json, test 15), while the GRU used 5-FOLD CV.
+FIXED: ran AR on the IDENTICAL 5-fold folds (same recs order, same seed=0 fold_of, same val carve) ->
+AR mean skill = +0.166 (per-fold 0.15-0.19, stable). So protocol-matched AR = +0.166 (vs +0.180 frozen).
+Ranking UNCHANGED and now fully apples-to-apples: AR +0.166 > GRU-aggregate +0.12-0.14 > CNN-map
++0.05-0.06 > flatten-map -0.03 > persistence 0. Updated docs/forecaster_comparison.png (AR line 0.166).

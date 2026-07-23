@@ -12,7 +12,8 @@ from collections import defaultdict
 
 import numpy as np
 
-AR_SKILL = 0.180          # harness linear AR, raw 6-dim target (history-agnostic)
+AR_SKILL = 0.166          # linear AR on the SAME 5-fold CV as the GRU (raw 6-dim; history-agnostic).
+#                           (The frozen-split harness AR was +0.180; +0.166 is the protocol-matched value.)
 
 
 def load(path):
@@ -37,7 +38,7 @@ def main():
         return [np.mean(data.get((enc, h), [np.nan])) for h in hists]
 
     fig, ax = plt.subplots(figsize=(9, 5.5))
-    ax.axhline(AR_SKILL, color="C3", ls="--", lw=2, label="linear AR (aggregate) = +0.18")
+    ax.axhline(AR_SKILL, color="C3", ls="--", lw=2, label=f"linear AR (aggregate, 5-fold) = +{AR_SKILL:.3f}")
     for enc, c, lbl in [("aggregate", "C0", "GRU (aggregate F/CoP input)"),
                         ("cnn", "C1", "CNN (tactile map input)"),
                         ("flatten", "C2", "flatten (tactile map input)")]:

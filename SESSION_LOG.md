@@ -1674,3 +1674,17 @@ frozen-split result (cnn +0.05..+0.08). Artifacts: docs/tactile_map_cv_results.c
 _coverage.png. (AR on aggregates +0.18 still the ceiling -- map+CNN helps vs flatten but not vs AR yet.)
 Added scripts/plot_tactile_map_loss_curve.py (train/val/test NLL+MSE per epoch for both encoders) to
 check whether the map model overfits like the F/CoP one (running).
+
+### LOSS CURVES (2026-07-22) — tactile-map models overfit almost immediately (flatten ep1, cnn ep4)
+scripts/plot_tactile_map_loss_curve.py (3s history, 60 ep, split by clip 52/11/12, train-only norm,
+eval cap 2500). docs/tactile_map_loss_curve.png:
+  flatten: min-val NLL @epoch 1; final NLL tr/va/te = -0.956/1.258/1.411 (memorizes instantly, val
+           rises from epoch 1 -> NO generalization window).
+  cnn:     min-val NLL @epoch 4; final NLL tr/va/te = -0.926/0.969/1.407 (val MSE dips/holds ~4 epochs
+           before rising -> a real learning window). 
+INTERPRETATION: both overfit MUCH faster than the F/CoP probGRU (ep 1-4 vs ep 10) -- the 2048-dim map
+is over-parameterized for only 45 train recordings. This IS the mechanism behind CNN>flatten: the CNN's
+spatial inductive bias extracts a little GENERALIZABLE signal before overfitting; flatten memorizes at
+once. Modest CV skill (+0.05-0.06) reflects DATA SCARCITY, not encoder failure; early stopping (CV keeps
+best-val) is essential (else val NLL ~1.3-1.4 by ep60). NEXT to widen the CNN lead: more data
+(activities/subjects), regularization (dropout/weight-decay/smaller d), or glove augmentation.

@@ -1887,3 +1887,41 @@ This is the ORIGINAL v2 model on a DIFFERENT target: the **high-pass FAST compon
 - Code: `src/actionsense/{eval_harness, tactile_map, action_dynamics.py}`; `scripts/train_tactile_map.py`,
   `plot_forecaster_comparison.py`, `plot_tactile_map*.py`, `plot_fcop_loss_curve.py`, `check_leakage.py`.
 - Tests: `tests/test_harness.py` (7), `tests/test_tactile_map.py` (10) -- all pass.
+
+---
+
+## PORTABILITY / CONTINUE ON ANOTHER COMPUTER (2026-07-24)
+Repo: https://github.com/Jiayi459/TouchAnything (origin/main @ 0071021). Working tree CLEAN, nothing
+unpushed. All ActionSense RAW TACTILE MAPS are now ON GITHUB (un-gitignored + committed).
+
+### PUSHED to GitHub (a plain clone has all of this)
+- All code: src/ (actionsense/{eval_harness,tactile_map,action_dynamics.py}, tactile_pixel/,
+  touchanything/), scripts/, configs/, tests/. SESSION_LOG.md, CLAUDE.md, AGENTS.md.
+- data/actionsense_states/: state_*.npy (299), manifest.jsonl, splits.json, AND all 100 clip_*.npy
+  (raw tactile maps, ~401MB) -> covers all 75 Slice/Peel recordings + 25 others. (Un-gitignored 2026-07-24.)
+- All docs/: every result CSV (harness_baselines, action_dynamics_results{,_earlystop},
+  tactile_map_cv_results{,_aggregate}, ...) and every figure (forecaster_comparison.png, loss curves,
+  skill plots, ...).
+- scripts/tmp_diag_predictability.py.
+=> Everything needed to REPRODUCE the forecasting work travels with the repo (states + maps + results).
+
+### NOT pushed (gitignored) -- and why / how to get them
+- datasets/ (~15GB): EgoTouch/OpenTouch/grasp_hold_lift_tactile = the OLDER PIXEL work. Too big for git,
+  NOT needed for the current ActionSense forecasting. Re-download (scripts/download_egotouch.py,
+  scripts/crc/download_opentouch.sh) only if returning to that thread.
+- .venv/ (~1.3GB): Python env -> regenerate with pip (below).
+- runs/ (~125MB): model npz + CRC logs -> regenerable; the results are already captured in docs/.
+
+### SETUP on the new machine
+  git clone https://github.com/Jiayi459/TouchAnything.git && cd TouchAnything
+  python -m venv .venv
+  .venv/bin/pip install numpy torch scipy pandas statsmodels pyarrow pytest matplotlib pyyaml   # (+ h5py only for CRC streaming)
+  pytest tests/            # expect 17 passing (7 harness + 10 tactile_map)
+Then you can immediately: view all results (docs/), re-run harness scoring, the aggregate-GRU, the
+tactile-map CV (maps are present), and all plots. GPU training uses CRC (see CRC LOGIN section above:
+`ssh crc` via bastion ProxyJump).
+
+### SECOND COPY on CRC
+~/TouchAnything (git repo; `git pull` to sync) + ~/actionsense/states/ (state_*.npy + clip_*.npy +
+manifest.jsonl from the re-stream). The ActionSense HDF5 were deleted (streaming-delete); re-stream via
+`bash scripts/crc/stream_actionsense.sh` (KEEP=1 to retain) only if regenerating states from scratch.

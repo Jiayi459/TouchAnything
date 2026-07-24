@@ -1765,3 +1765,125 @@ FIXED: ran AR on the IDENTICAL 5-fold folds (same recs order, same seed=0 fold_o
 AR mean skill = +0.166 (per-fold 0.15-0.19, stable). So protocol-matched AR = +0.166 (vs +0.180 frozen).
 Ranking UNCHANGED and now fully apples-to-apples: AR +0.166 > GRU-aggregate +0.12-0.14 > CNN-map
 +0.05-0.06 > flatten-map -0.03 > persistence 0. Updated docs/forecaster_comparison.png (AR line 0.166).
+
+---
+
+## CONSOLIDATED RESULTS & METHODS (2026-07-24) — 1-second tactile forecasting on Slice/Peel
+
+Rigorous write-up of the current forecasting results. Self-contained: a reader should be able to
+reproduce and interpret everything from this section. (Supersedes the scattered incremental entries
+above for the purpose of a clean summary; those remain as the running log.)
+
+### 0. Common setup (shared by all raw-target experiments)
+- **Data**: ActionSense wearables, conductive-thread gloves, 32x32 taxels/hand, 2 hands. Activities
+  **Slice (45 recordings: cucumber/potato/bread x15) + Peel (30: cucumber/potato x15) = 75**. Each
+  recording is one activity interval segmented by the HDF5 Start/Stop markers, resampled to 30 Hz,
+  then **downsampled x3 -> 10 Hz** (`cfg.downsample=3`). Stored as `state_<idx>.npy` (T,2,6) physical
+  moments (per-taxel 5th-pct DC baseline removed) + raw map `clip_<idx>.npy` (T,2,32,32).
+- **Target (raw 6-dim)**: `eval_harness.dataset.load_target` -> [F_L, CoPx_L, CoPy_L, F_R, CoPx_R,
+  CoPy_R] = moments 0..2 of each hand, at 10 Hz. This is the FULL raw signal (NOT high-pass filtered).
+- **Horizon**: 1 s = **10 steps** (100 ms each). Forecast origins from `min_history=40`, stride 1;
+  predictions indexed by TARGET time t+h.
+- **Frozen split**: `data/actionsense_states/splits.json` = 60/20/20 by RECORDING, stratified by
+  (activity, object): **train 45 / val 15 / test 15**. (Also used: 5-fold CV by recording, seed 0.)
+- **Causality/leakage**: all filtering causal (sosfilt, no filtfilt); normalization fit on TRAIN only;
+  split by clip so no window crosses splits (verified by `scripts/check_leakage.py`, 6 checks PASS).
+- **Metric**: skill = 1 - MSE_model/MSE_persistence (0=tie persistence, 1=perfect, <0=worse), per
+  channel/step + mean; CoP channels masked where that hand's raw force < TRAIN 5th-pct; coverage@2sd
+  for probabilistic models (target 0.95 after sigma-calibration).
+
+### 1. Classical baselines on the raw 6-dim target (frozen harness)
+Method: `eval_harness/evaluate.py` fits on TRAIN, selects hyperparameters on VAL, scores TEST once.
+- **persistence** y_hat(t+h)=y(t): the 0-skill reference. STRONG here (raw F/CoP drifts slowly).
+- **seasonal-naive**: period estimated per (activity,object) from TRAIN autocorrelation. **Falls back
+  to persistence for ALL groups** -> the raw aggregate has NO autocorrelation peak in 0.3-3 s (slow
+  trend dominates). Documented finding, not a bug.
+- **linear AR**: per-channel statsmodels AutoReg, trend='c', order p in {2,5,10,15,20,30} selected on
+  VAL, per (activity,object). **Mean skill = +0.180** (frozen split); **+0.166** re-scored on 5-fold
+  CV (protocol-matched, per-fold 0.15-0.19). Best channel right-hand CoP-x (+0.25). nRMSE 0.467 vs
+  persistence 0.517.
+
+### 2. Tactile-MAP forecasters (raw 6-dim target)  [scripts/train_tactile_map.py, src/actionsense/tactile_map/]
+Question: does the raw pressure MAP carry extra 1-s predictive signal vs the aggregates?
+Method (identical for both encoders; only the per-frame encoder differs):
+- Input = past `t_in` frames of the map (2,32,32); preprocessing: causal per-taxel first-N-frame
+  baseline (N=10), log1p compression (alpha=10), global TRAIN scale. History swept t_in in {1,3,10 s}.
+- Encoders: **flatten** Linear(2048->64); **CNN** 3-conv -> global-avg-pool -> 64. Both -> shared GRU
+  (hidden 64) -> one-shot PROBABILISTIC head (mu, logvar) -> (10,6).
+- Target = RESIDUAL over persistence (predict change vs last value; at worst matches persistence).
+- Training: Gaussian NLL, **5-fold CV by recording**, **early stopping** (best-VAL-NLL checkpoint),
+  post-hoc sigma-calibration on VAL. (CRC GPU run for the map models.)
+Results (mean skill vs persistence, 5-fold CV):
+    history |  CNN(map) | flatten(map)
+      1s    |  +0.052   |   -0.040
+      3s    |  +0.050   |   -0.025
+     10s    |  +0.063   |   -0.026     (coverage 0.93 raw -> 0.95 calibrated)
+- **CNN > flatten at every history** -> the contact-patch SPATIAL structure contributes to predicting
+  the change in F/CoP. Flatten sits at/below persistence.
+- Loss curves (`plot_tactile_map_loss_curve.py`): both encoders **overfit almost immediately** (flatten
+  min-val ep1, cnn ep4) -- the 2048-dim map is over-parameterized for 45 train recordings. CNN's brief
+  generalization window (val holds ~4 epochs) IS the mechanism behind CNN>flatten. Early stopping is
+  essential (else val NLL ~1.3-1.4 by ep60).
+
+### 3. Aggregate-F/CoP GRU (neural AR, raw 6-dim target)  [encoder="aggregate"]
+Method: identical protocol to sec.2 (5-fold CV, probabilistic, residual, early-stop, calibration) but
+input = past `t_in` frames of the raw 6-dim F/CoP itself (autoregressive; the neural counterpart of AR).
+Results (mean skill vs persistence, 5-fold CV): **1s +0.120, 3s +0.138, 10s +0.142** (coverage ~0.95).
+
+### 4. FOUR-WAY comparison (raw 6-dim target, IDENTICAL 5-fold CV, same input/target/data)  [docs/forecaster_comparison.png]
+    linear-AR +0.166  >  GRU-aggregate +0.12..+0.14  >  CNN-map +0.05..+0.06  >  flatten-map -0.03  >  persistence 0
+RIGOR: verified GRU-aggregate and AR use the SAME target (load_target, raw 6-dim both hands, NOT fast),
+SAME autoregressive input, SAME Slice/Peel data, and (after fixing) the SAME 5-fold folds (AR re-scored
+5-fold = +0.166 vs +0.180 frozen-split). Caveat: AR is not swept over t_in (it selects its own order as
+history) -> a single history-agnostic number.
+
+### 5. Fast-component probGRU (SEPARATE experiment, different target)  [src/actionsense/action_dynamics.py]
+This is the ORIGINAL v2 model on a DIFFERENT target: the **high-pass FAST component**, 3-dim, ONE hand
+([F_fast,x_fast,y_fast]). NOT comparable to the raw-target results above (different target/baseline).
+- **Overfitting fix**: `action_dynamics.train` originally ran 80 epochs and returned the FINAL model
+  (no early stopping) -> badly overfit (train/val/test loss curve: val bottoms ~epoch 10 then rises;
+  `docs/fcop_earlystop_comparison.png`). Added early stopping (keep best-VAL). Effect (5-fold CV):
+  skill improved **+0.10..+0.23 per config**; best ~**+0.51** (right hand); and skill became **~flat
+  across history** (the earlier "more history HURTS" finding was an OVERFITTING ARTIFACT -- longer
+  history overfit more without early stopping). Coverage ~0.95 (calibration handled both).
+- **MSE decomposition** (raw/right/3s, normalized fast target, one split): probGRU-earlystop 0.737,
+  AR-on-fast 0.763, predict-mean 0.978 (=variance), probGRU-overfit 0.951, persistence-of-fast 1.624.
+  Honest R^2 (=1-MSE/0.978): early-stop +0.25, AR +0.22, overfit +0.03. -> (a) persistence-of-fast is
+  a WEAK baseline (worse than the mean) so skill-vs-persistence is inflated; (b) the honest signal is
+  ~25% variance explained; (c) linear AR ~TIES the GRU on the fast target too.
+
+### 6. ANALYSIS / CONCLUSIONS
+1. **A linear autoregression is the best 1-s forecaster of the raw F/CoP.** Neither nonlinearity (GRU)
+   nor a richer input (the tactile map) beats per-channel linear AR. The predictable part of this
+   signal over 1 s is the (near-)linear autoregressive trend.
+2. **The tactile MAP is an inferior input to the aggregate** for this target (map +0.05 << aggregate
+   +0.14): passing through the pixel representation loses information -- the net must reconstruct
+   F(=sum) and CoP(=centroid) from pixels, imperfectly, when those aggregates were available directly.
+3. **Within the map, spatial structure still helps** (CNN +0.05 > flatten -0.03), robust across history
+   and CV -- but not enough to reach the aggregate, let alone AR.
+4. **Overfitting silently depressed the neural results** (both the fast-target probGRU and the map
+   models). Early stopping is decisive: it turned a near-useless overfit fast-probGRU (R^2 +0.03) into
+   a genuinely predictive one (R^2 +0.25), and it corrected the spurious "more history hurts" trend.
+5. **Baseline choice matters for interpretation.** Skill-vs-persistence flatters models on the FAST
+   target (persistence-of-fast is worse than the mean); variance-explained (R^2 vs mean) is the honest
+   cross-target metric.
+
+### 7. CAVEATS / LIMITATIONS
+- **Data-scarce**: only 45 training recordings (Slice+Peel); the 2048-dim map models overfit by ~epoch
+  1-4. Conclusions about "map doesn't help" are for THIS data regime; more data/regularization/augmentation
+  could change the map's standing.
+- **1-s horizon only**; linear AR dominates at 1 s -- longer horizons (where linear extrapolation breaks)
+  were not tested and could favor the map/nonlinear models.
+- **Two targets in play**: raw 6-dim both-hands (harness, sec.1-4) vs fast 3-dim one-hand (probGRU, sec.5).
+  Their skill numbers are NOT comparable (different persistence baselines). R^2-vs-mean is comparable.
+- AR uses its own order as history (not swept over t_in); it is a single number in the four-way plot.
+
+### 8. ARTIFACTS
+- Figures: `docs/forecaster_comparison.png` (four-way), `tactile_map_skill_vs_history.png`,
+  `tactile_map_coverage.png`, `tactile_map_loss_curve.png`, `fcop_earlystop_comparison.png`,
+  `fcop_loss_curve.png`, `harness_*curves.png`.
+- Tables: `docs/tactile_map_cv_results.csv` (cnn/flatten), `tactile_map_cv_results_aggregate.csv`,
+  `harness_baselines.csv` (persistence/seasonal/AR), `action_dynamics_results{,_earlystop}.csv` (fast).
+- Code: `src/actionsense/{eval_harness, tactile_map, action_dynamics.py}`; `scripts/train_tactile_map.py`,
+  `plot_forecaster_comparison.py`, `plot_tactile_map*.py`, `plot_fcop_loss_curve.py`, `check_leakage.py`.
+- Tests: `tests/test_harness.py` (7), `tests/test_tactile_map.py` (10) -- all pass.

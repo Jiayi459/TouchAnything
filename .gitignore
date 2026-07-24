@@ -28,5 +28,5 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# large cached raw tactile clips (states are kept; clips regenerable on CRC)
-data/actionsense_states/clip_*.npy
+# raw tactile map clips: now TRACKED (committed for portability across machines, ~401MB).
+# (previously gitignored + kept only on CRC.)

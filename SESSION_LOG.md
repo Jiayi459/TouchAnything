@@ -1925,3 +1925,63 @@ tactile-map CV (maps are present), and all plots. GPU training uses CRC (see CRC
 ~/TouchAnything (git repo; `git pull` to sync) + ~/actionsense/states/ (state_*.npy + clip_*.npy +
 manifest.jsonl from the re-stream). The ActionSense HDF5 were deleted (streaming-delete); re-stream via
 `bash scripts/crc/stream_actionsense.sh` (KEEP=1 to retain) only if regenerating states from scratch.
+
+---
+
+## Session (2026-08-05) — PROJECT CONCLUSIONS document
+
+### Request
+Read SESSION_LOG.md thoroughly; conclude all results so far as points, covering project detail with
+high clarity/logic/completeness; write it as a separate file in the documents folder; refer to
+specific code and documents throughout; list references at the end; ask questions if any arise.
+
+### Work done
+- Read all 1,927 lines of SESSION_LOG.md (Sessions 1-4 + COMPREHENSIVE SUMMARY + COLD-START SNAPSHOT
+  + rigorous review + CONSOLIDATED RESULTS + PORTABILITY).
+- **VERIFIED every quantitative claim against the committed artifacts** rather than trusting the log:
+  recomputed mean skills directly from `docs/harness_baselines.csv` (AR +0.1886 over 66 rows;
+  seasonal 0.0 == persistence, confirming the documented fallback), `docs/tactile_map_cv_results.csv`
+  (cnn +0.052/+0.050/+0.063, flatten -0.040/-0.025/-0.026), `_aggregate.csv` (+0.120/+0.138/+0.142),
+  and both `action_dynamics_results{,_earlystop}.csv` (per-config means + calibrated coverage). All
+  match the log. Also confirmed `splits.json` = train 45 / val 15 / test 15, n=75, seed 0.
+- Checked the harness config hash: `sha256(configs/actionsense/eval_harness.yaml)[:16]` =
+  **8afc249f260894fd**, which MATCHES the hash stamped in `docs/harness_baselines.csv`. The
+  `b0194860` cited in the 2026-07-16 log entry is stale — it predates commit `ee8d097` (reorg stage
+  4a) which MOVED the yaml into `configs/actionsense/`, changing the file bytes and hence the hash.
+  Results are current; only the log's hash string is historical. (No action needed; noted so a future
+  reader isn't confused by the mismatch.)
+- Verified the code line references cited in the new document actually exist (physical_state.py:68
+  percentile baseline; action_dynamics.py slow_fast/build_features/windows/ProbGRU/train/
+  calibrate_sigma/evaluate; tactile_map/data.py:51 log1p and :140 residual-over-persistence target;
+  eval_harness/metrics.py:45 skill).
+
+### Deliverable
+**NEW `docs/PROJECT_CONCLUSIONS.md`** — the concluding document. Structure: (0) what the project
+became; (1) the five phases; (2-6) per-phase results as points, each with code/doc citations;
+(7) nine cross-cutting methodological conclusions; (8) caveats/limits; (9) status + open items
+ranked by scientific value; (10) full reference list (log sections, project docs, code modules with
+line anchors, scripts, result artifacts, external datasets/papers).
+
+Content decisions (stated for review):
+- Positioned as a CONCLUSION of the whole project, not a replacement for the existing
+  docs/STUDY_SUMMARY.md (predictability study) or docs/RESULTS.md (EgoTouch pixel forecaster) —
+  it links to both and does not duplicate their tables beyond the headline numbers.
+- Deliberately foregrounded the SELF-CORRECTIONS (filtfilt leak -0.3 skill; early stopping turning
+  R^2 +0.03 into +0.25 and retracting the "more history hurts" finding; the weak-baseline audit
+  showing predict-zero scores +0.57) as first-class results, since they change how every earlier
+  number must be read.
+- Recorded the original grasp-success goal as formally unanswerable on EgoTouch (no success labels)
+  — this is the reason the project pivoted, and it belongs in a conclusion.
+- Flagged that the feedback/adaptive-strategy application (the ultimate stated goal) is still
+  UNBUILT despite all its prerequisites now existing — open item #1.
+
+### Open questions for the user (non-blocking; document delivered)
+1. Audience: is this for a supervisor/collaborator handoff, or a draft skeleton toward a paper? A
+   paper draft would want the four-way comparison and the metric audit promoted to the front and the
+   EgoTouch phase compressed to a paragraph.
+2. Should `docs/STUDY_SUMMARY.md` and `docs/RESULTS.md` now be marked as superseded-in-part by this
+   document (they predate the causal-filter and early-stopping corrections), or left standing as
+   phase-local records?
+3. Should the honest R^2-vs-mean metric be recomputed for the raw-6-dim four-way comparison (§6.4)?
+   Currently only the fast-target experiment (§5.5) has it; without it the +0.166 AR headline still
+   rests on skill-vs-persistence, which the audit showed can flatter.

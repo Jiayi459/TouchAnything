@@ -1985,3 +1985,530 @@ Content decisions (stated for review):
 3. Should the honest R^2-vs-mean metric be recomputed for the raw-6-dim four-way comparison (§6.4)?
    Currently only the fast-target experiment (§5.5) has it; without it the +0.166 AR headline still
    rests on skill-vs-persistence, which the audit showed can flatter.
+
+---
+
+## Session (2026-08-06) — DATA AVAILABILITY AUDIT (ActionSense content/format; OpenTouch; Force-Vision)
+
+### Request
+Point out the ActionSense data and its content/format; and for OpenTouch
+(opentouch-tactile.github.io) and the ICLR Force-Vision submission site, report whether they are
+downloaded, how much, and where. Refer to SESSION_LOG for history.
+
+### Method — verified on the filesystem, not from the log
+Did not trust prior log statements; re-derived every number from the working tree
+(`/Users/haojiayi/TouchAnything`, branch main, tree clean) with `du`, `numpy` loads of every
+`.npy`, and a parse of `manifest.jsonl`. Also ran a `find ~ -maxdepth 4` sweep for
+`*opentouch*`/`*force*vision*`/`*actionnet*` dirs and any `*.hdf5`/`*.h5` under `$HOME`.
+
+### FINDING 1 — ActionSense: the ONLY dataset present on this machine (416 MB, git-tracked)
+Location: `data/actionsense_states/` — 401 tracked files (`git ls-files data | wc -l` = 401),
+416 MB, all committed to GitHub (un-gitignored 2026-07-24, see PORTABILITY section).
+Two artifact kinds, disjoint index sets, plus two metadata files:
+- **`state_*.npy` x 299** — physical-state time series, `float32`, shape **(T, 2, 6)**
+  = (frames, {left,right} glove, `[F, xbar, ybar, sxx, syy, sxy]`), definitions in
+  `src/actionsense/physical_state.py:26,37` (F = Σp; CoP = Σp·x/Σp; second moments). Resampled to
+  **30 Hz** from the native ~6 Hz. T range 82 / median 763 / max 6602; **320,309 frames total**
+  (per manifest). Derived AFTER per-taxel 5th-percentile baseline subtraction
+  (`physical_state.py:64-68`).
+- **`clip_*.npy` x 100** — raw tactile maps, `float16`, shape **(T, 2, 32, 32)** = (frames,
+  {L,R}, 32x32 taxels), ~401 MB of the 416 MB, value range ~499-1016 (uncalibrated sensor units,
+  DC-offset NOT removed at this stage). 422,696 frames across the 100 clips.
+- **`manifest.jsonl`** (299 lines, one per state clip): `{idx, label, cat, fps, T, features,
+  has_clip}`.
+- **`splits.json`**: train 45 / val 15 / test 15 (n=75, seed 0) — the Slice/Peel forecasting subset.
+- **STALE FIELD FOUND:** `manifest.jsonl` reports `has_clip=true` for only **70** clips, but **100**
+  `clip_*.npy` exist on disk. The manifest was written before the second map-extraction pass; every
+  clip id on disk does resolve to a manifest row, so nothing is orphaned — but code must not use
+  `has_clip` as the source of truth for map availability. Glob the directory instead.
+- **Which clips have raw maps** (all 100, by label): Pour water 25, Peel cucumber 15, Slice cucumber
+  15, Peel potato 15, Slice potato 15, Slice bread 15. I.e. the 75 Slice/Peel recordings used by the
+  tactile-map CV + 25 Pour. No maps exist for Clean/Spread/Organize/Open-close-jar.
+- **Full label inventory (299 state clips, 22 raw labels / 6 categories)**: Clear cutting board 28,
+  Pour water 25, Get items from fridge/cabinets/drawers 24, Peel cucumber 15, Slice cucumber 15,
+  Peel potato 15, Slice potato 15, Slice bread 15, Spread almond butter 15, Spread jelly 15, Clean
+  plate w/ sponge 15, Clean plate w/ towel 15, Clean pan w/ sponge 15, Clean pan w/ towel 15,
+  Get/replace items 15, Open/close jar 9, Open jar 6, Get items from cabinets 6, Set table 6, Stack
+  on table 5, Load dishwasher 5, Unload dishwasher 5. Categories: Cut / Pour / Wash-Clean /
+  Fold-Cloth(spread) / Organize-Arrange / Open-Close.
+- **NOT present locally:** the source ActionSense wearables HDF5 (~2-4 GB each x 12, ~35-88 GB) —
+  deleted by the streaming driver `scripts/crc/stream_actionsense.sh` on CRC. Re-fetchable via
+  `scripts/crc/download_actionsense.sh` (12 public URLs, data.csail.mit.edu/ActionNet, S00-S05).
+  Consequence already noted in PROJECT_CONCLUSIONS §8: subject ids are unrecoverable without a
+  ~88 GB re-stream.
+
+### FINDING 2 — OpenTouch: downloaded once on CRC, since DELETED; nothing on this machine
+- Was fully downloaded on CRC (2026-07-02): **26 HDF5 shards ~14 GB (561 MB/shard) + labels**, via
+  `scripts/crc/download_opentouch.sh` (26 gdown file IDs + `final_annotation.zip` ID, copied
+  verbatim from OpenTouch-MIT/opentouch), default dest `~/opentouch/data`. Probed successfully:
+  2,496 usable of 2,958 clips.
+- **Then deleted** during the ActionSense disk crisis (SESSION_LOG:571-573: "OpenTouch raw data got
+  deleted along the way (kept its earlier CSV)"). Confirmed 0 bytes on this Mac: no `~/opentouch`,
+  no `.hdf5`/`.h5` anywhere under `$HOME`, no `datasets/` dir in the repo.
+- **Its derived result CSV is also not local:** `docs/predictability_opentouch.csv` was written on
+  CRC and never pushed. `docs/` only holds `predictability_by_category{,_full}.csv`, which I
+  verified are the **EgoTouch** probe outputs (grouping/group/n/pers_nmse_h1/h15/h30/periodicity/
+  contact_migration/predictability_index; B5 composite n=379/411 — EgoTouch trajectory counts, not
+  OpenTouch's 2,496). The OpenTouch numbers survive only as prose in
+  `docs/ACTION_CATEGORIES.md` §3b and `docs/PROJECT_CONCLUSIONS.md`.
+- Recovery cost if needed: `pip install gdown && bash scripts/crc/download_opentouch.sh` -> ~14 GB.
+
+### FINDING 3 — Force-Vision (sites.google.com/view/iclr-submission-force-vision): NEVER downloaded
+- 0 bytes, on any machine, at any point. Confirmed by log (SESSION_LOG:385, 588, 703) and by
+  `docs/PROJECT_CONCLUSIONS.md:368` ("Force-Vision was never downloaded — its contribution is
+  taxonomic only"), and by the disk sweep (no `*force*` dirs under `$HOME`).
+- No download script exists for it (`scripts/crc/` has only `download_actionsense.sh` and
+  `download_opentouch.sh`); `scripts/download_egotouch.py` covers EgoTouch.
+- Availability was checked on 2026-07-02 (SESSION_LOG:483): **public Google-Drive zip**.
+- Its entire contribution to the project is taxonomic, read from the paper: STAG glove
+  (Sundaram et al.), 2,000,000 frames, 89 articulated tools, manipulation types press / hold /
+  squeeze, mapped into Axes A/B/C/D in `docs/ACTION_CATEGORIES.md` §2. No tactile array from it has
+  ever been loaded.
+
+### Summary table (state as of 2026-08-06)
+| Dataset | Downloaded? | How much | Where |
+|---|---|---|---|
+| ActionSense | Yes, derived form only | 416 MB (299 state + 100 map .npy + manifest/splits) | `data/actionsense_states/` (git-tracked, on GitHub); raw HDF5 deleted from CRC |
+| OpenTouch | Yes once, now deleted | was ~14 GB / 26 shards; now 0 | ex-`~/opentouch/data` on CRC; nothing local; result CSV also only on CRC |
+| Force-Vision | **No, never** | 0 | n/a — paper-only taxonomy |
+| EgoTouch (4th, deprecated) | Yes, on CRC | part of gitignored `datasets/` ~15 GB | not local; deprecated 2026-07-03 |
+
+### Conclusions / risks worth acting on
+1. `manifest.jsonl:has_clip` is stale (70 vs 100). Low severity today because the forecasting code
+   globs, but it is a live trap for any future consumer. Cheap fix: regenerate the field.
+2. `docs/predictability_opentouch.csv` is the only quantitative OpenTouch artifact and it exists on
+   exactly one machine (CRC) with no backup. If OpenTouch conclusions are to survive, that CSV
+   should be pulled into `docs/` and committed — far cheaper than the 14 GB re-download.
+3. Force-Vision remains the one clean way to add a 4th sensor geometry to the cross-dataset trait
+   claim, and it is a single public Google-Drive zip. Still open, still cheap.
+
+### No code changed this session (audit only).
+
+---
+
+## SESSION (2026-08-06) — PORT THE FORECASTER TO OPENTOUCH: dataset analysis + PLAN (AWAITING USER)
+
+### Request
+User: "look at https://opentouch-tactile.github.io/ in detail; check whether the predictability
+algorithm could also be used on this dataset — right now it was only trained on ActionSense.
+Analyze the dataset: format? actions? which actions should be downloaded? Reference SESSION_LOG
+for how we downloaded before (I believe part of OpenTouch is already on CRC). Ask questions until
+100% sure, then WAIT for permission before downloading."
+
+### CLARIFICATION OF WHAT "THE PREDICTABILITY ALGORITHM" MEANS HERE
+Two distinct artifacts exist in this project and only ONE of them is ActionSense-only:
+1. **Training-free predictability probe** (persH1/15/30, periodicity, contact_migration, PI) —
+   ALREADY RUN ON OPENTOUCH (2,496 usable of 2,958 clips, 2026-07-02; SESSION_LOG:530-543,
+   docs/ACTION_CATEGORIES.md 3b). Nothing to port.
+2. **Trained physical-state forecaster + frozen eval harness** (Phase D/E: F/CoP target, 1 s
+   horizon, persistence / seasonal-naive / linear AR / GRU-aggregate / CNN-map / flatten-map,
+   frozen 60/20/20 split, sigma-calibration) — ActionSense ONLY. **This is what the user means.**
+   Porting it to OpenTouch = the first CROSS-SENSOR test of the four-way ranking
+   (AR +0.166 > GRU +0.14 > CNN-map +0.05 > flatten-map -0.03 > persistence 0).
+This is also PROJECT_CONCLUSIONS 9 open item #7 ("GPU per-category forecasting on OpenTouch to
+convert the probe hypothesis into measured skill").
+
+### DATA STATE (re-verified against the 2026-08-06 audit above)
+- OpenTouch raw HDF5: downloaded once on CRC (~14 GB), **DELETED** during the ActionSense disk
+  saga. Nothing on this Mac. `docs/predictability_opentouch.csv` also exists ONLY on CRC.
+- => A full re-download is required. `scripts/crc/download_opentouch.sh` (26 shard IDs + labels)
+  was re-verified today against the upstream `OpenTouch-MIT/opentouch/scripts/download_data.sh`:
+  **27 IDs (26 shards + `1cM-816vcCnkgWVIGXZrR1o8TPsDvRVCZ` labels) — still current, unchanged.**
+
+### DATASET ANALYSIS — OpenTouch (arXiv 2512.16842; opentouch-tactile.github.io)
+**Capture**: Meta Aria glasses (egocentric RGB) + FPC full-hand tactile glove + Rokoko Smartgloves
+(pose), synchronized at **30 Hz**, ~2 ms mean latency. 5.1 h total, ~3 h densely annotated,
+14 environments, ~800 objects / 14 object categories. Single **RIGHT** hand.
+
+**Distribution format**: Google Drive via `gdown`; **26 HDF5 shards** (~561 MB each, ~14.6 GB
+total, one shard per scene+participant, e.g. `office_csail_p2.hdf5`, `fablab_ml_p1.hdf5`) plus
+`final_annotation.zip` (small).
+
+**HDF5 schema (confirmed live on CRC 2026-07-02, SESSION_LOG:507-523)**
+```
+<shard>.hdf5
+  calibration, transform_slam_to_rgb
+  data/<clip_id>/
+      right_pressure     (T,16,16) float32, max 3072        <- THE ONLY THING WE NEED
+      rgb_images_jpeg    <- the reason shards are 561 MB
+      camera_poses, hand_landmarks, timestamps
+      labels             (0,0) index-pair — NOT the action
+```
+**Labels**: `final_annotations/<scene>_merged.csv`, one row per clip, key `clip_id` =
+`"<scene>::demo_NNN"` (globally unique), columns: `action` (free-text gerund), `grip_type`
+(29-class GRASP taxonomy), `object_name`, `object_category`, `environment`, `description`,
+`peak_idx`. Join rate verified 100% on the pilot shard; 457/2,958 clips carry no label row.
+
+**Actions (observed vocabulary, gerunds)**: placing, adjusting, removing, pinching, picking up,
+holding, pulling, pushing, moving, pressing, turning, pouring, serving, eating, stirring,
+scooping, flipping, wiping, cutting, plus examining, carrying, lowering, aligning, typing,
+touching, tightening, unscrewing, tilting, tapping, feeling, inspecting, switching, detaching,
+attaching, pointing, resting. Mapped into our taxonomy by `categorize_phrase()`.
+
+**Our own probe ranking on these actions (PI, easiest -> hardest)**:
+`pouring +4.4 - serving +3.6 - eating +3.4 - stirring +3.0 - scooping +2.5 - flipping +2.4 -
+wiping +1.3` ... `pulling -1.8 - turning -2.2 - moving -2.6 - cutting (n=4) -3.0`.
+=> The forecasting experiment has a PRE-REGISTERED PREDICTION: skill should track this order.
+
+### GAP ANALYSIS — what breaks when the ActionSense harness meets OpenTouch
+| # | Gap | Detail | Proposed handling |
+|---|---|---|---|
+| G1 | **One hand** | target is 6-dim `[F,CoPx,CoPy] x {L,R}`; OpenTouch has right only | 3-dim target `[F_R,CoPx_R,CoPy_R]`; compare against the ActionSense RIGHT-hand columns only |
+| G2 | **Clip length** | 5.1 h / 2,958 clips = **~6.2 s mean**. Harness `min_history: 40` @10 Hz = 4 s + 1 s horizon = 5 s floor -> most clips yield 0-12 origins | lower `min_history`; report retained-clip count; see OQ3 |
+| G3 | **Rate** | OpenTouch is genuinely 30 Hz (ActionSense was 6 Hz *up*sampled then down to 10) | see OQ3 |
+| G4 | **Baseline/DC** | FPC pressure is probably ~0 at rest (unlike the conductive thread's ~571/taxel DC that caused bug P4). But clips are segmented around `peak_idx`, so a causal first-N-frames baseline may already be IN contact | measure the rest-value distribution in `--inspect` BEFORE choosing; do not assume |
+| G5 | **Force units** | 0..3072 FPC vs uncalibrated thread -> `F` is NOT comparable across corpora | zero-shot transfer would need per-corpus z-scoring; CoP (already [-1,1]) is the only natively transferable channel |
+| G6 | **Split axis** | ActionSense manifest has **no subject id** -> its results are within-corpus only (open item #5) | OpenTouch `clip_id` encodes **scene + participant** (`_p1`/`_p2`) -> we CAN hold out environment/participant. **This is a genuine upgrade over ActionSense.** |
+| G7 | **Fit grouping** | harness `fit_scope: group` = action x object | OpenTouch has `action` + `object_category` -> maps cleanly |
+| G8 | **Map encoder** | flatten branch is `Linear(2048->64)` for 2x32x32 | 1x16x16 = 256 -> re-instantiate input dim (trivial); CNN branch is shape-agnostic |
+| G9 | **Disk** | 14.6 GB of shards, of which we need only `right_pressure` (~276 MB fp16 for the WHOLE corpus) | stream-extract (download shard -> extract -> delete), same trick as `stream_actionsense.sh`; result is a permanent ~300 MB local cache, never re-download again |
+
+### WHICH CLIPS/ACTIONS TO DOWNLOAD — the key point
+Actions are **scattered across scenes**, so shards cannot be pre-filtered by action *blindly*.
+BUT `final_annotation.zip` is small and independent -> **download labels FIRST (minutes), build the
+action x scene contingency table, THEN decide which shards to pull.** This turns "what should be
+downloaded" from a guess into a measurement. Recorded as the mandatory Step 0.
+
+### PROPOSED PLAN (pending answers)
+- **Step 0 (cheap, ~1 min, no commitment)**: `gdown 1cM-816vcCnkgWVIGXZrR1o8TPsDvRVCZ` -> unzip ->
+  action x scene x participant x object_category counts + clip-duration histogram if derivable.
+  Decide shard subset from real counts.
+- **Step 1**: download the selected shards; stream-extract `right_pressure` + `timestamps` + label
+  row -> `data/opentouch_states/{state_N.npy, clip_N.npy(fp16), manifest.jsonl}` mirroring the
+  ActionSense layout so the harness loads it with a config swap, not a rewrite; delete each shard
+  after extraction. Verify G4 (rest baseline) here.
+- **Step 2**: `configs/opentouch/eval_harness.yaml` (3-dim target, rate/min_history per OQ3,
+  split per OQ4) + minimal generalizations in `eval_harness/dataset.py` + `splits.py`.
+- **Step 3**: classical baselines (persistence / seasonal-naive / linear AR) on the frozen split.
+- **Step 4**: GRU-aggregate + CNN-map + flatten-map -> reproduce the four-way comparison figure.
+- **Step 5**: per-action skill sweep -> test the probe's pre-registered ordering.
+- Report BOTH skill-vs-persistence AND R^2-vs-mean (methodological lesson #4).
+
+### OPEN QUESTIONS (asked of the user 2026-08-06; NOT resolved yet — no code, no download)
+- **OQ1 — primary experiment**: in-domain refit of the four-way comparison (sensor-independence
+  test) / zero-shot transfer of the ActionSense-fitted models / both / per-action skill sweep?
+- **OQ2 — download scope**: all 26 shards, or a label-driven subset, or a 2-3 shard pilot first?
+- **OQ3 — rate & history**: downsample 30->10 Hz (exactly matches the ActionSense harness:
+  horizon = 10 steps, AR order grid 2..30) vs native 30 Hz (3x the windows, horizon = 30 steps,
+  AR order grid must be rescaled) vs both. Couples to G2: at 10 Hz, `min_history: 40` = 4 s and
+  most 6 s clips die; proposed default `min_history: 20` (2 s) with retention reported.
+- **OQ4 — split axis**: hold out scene/participant (new-environment claim, impossible on
+  ActionSense) vs clip-level stratified (apples-to-apples with the ActionSense protocol) vs both.
+- **OQ5 — where**: CRC (download script already there, 14 GB fits) then rsync the ~300 MB cache
+  local for CPU modelling — vs entirely local.
+- **OQ6 — free rider**: while on CRC, also pull back `docs/predictability_opentouch.csv`
+  (the only quantitative OpenTouch artifact, single-copy on CRC)? It is a file copy, not a rerun.
+  *(Note: it is on CRC only if that file survived; if not, Step 1 regenerates it for free.)*
+
+### STATUS: WAITING for user answers to OQ1-OQ6. Nothing downloaded, no code written.
+
+### DECISIONS (user, 2026-08-06, via AskUserQuestion) — OQ1-OQ5 RESOLVED
+| OQ | Decision | Consequence |
+|---|---|---|
+| OQ1 experiment | **Both**: in-domain refit of the four-way comparison **+** per-action skill sweep | One training pipeline; the sweep is a second reporting pass over the same TEST predictions, grouped by `action`. Pre-registered prediction = the probe order (pouring/serving/eating/stirring/scooping easiest; cutting/moving/turning/pulling hardest). |
+| OQ2 download | **Labels first, then decide** | Step 0 = `gdown 1cM-816vcCnkgWVIGXZrR1o8TPsDvRVCZ` only. Build action x scene x participant x object_category counts. Shard selection is then EVIDENCE-DRIVEN, not guessed. No 14 GB commitment until the table exists. |
+| OQ3 rate/history | **10 Hz (downsample 3), `min_history: 20`** | horizon = 10 steps = 1.0 s and AR order grid `[2,5,10,15,20,30]` stay IDENTICAL to the ActionSense harness -> numbers are directly comparable. min_history 40->20 (4 s -> 2 s) so ~6 s clips survive; retained-clip count is a REPORTED number, not a silent filter. Native 30 Hz deferred (not refused) as a later sensitivity check. |
+| OQ4 split | **Both; scene/participant hold-out is the HEADLINE**, clip-level stratified reported alongside | Headline = a real new-environment/new-participant generalization claim, which ActionSense structurally could not make (no subject id; PROJECT_CONCLUSIONS 9 open #5). Clip-level = apples-to-apples with the existing ActionSense +0.166. Expect headline < clip-level; that gap is itself a result. |
+| OQ5 where | **CRC download+extract, rsync ~300 MB cache local, model locally on CPU** | Mirrors the ActionSense workflow. User runs the CRC commands (I have no SSH); I do everything downstream. |
+| OQ (map) | **DEFER the tactile-map branch.** First pass = persistence / seasonal-naive / linear AR / GRU-aggregate | The cache still stores raw 16x16 clips (fp16), so CNN-map/flatten-map can be added later WITHOUT re-downloading. **Recorded honestly: the four-way comparison is therefore NOT completed in this pass** — the refit tests AR vs GRU vs the two classical baselines only. G8 (Linear(2048->64) -> 256) stays open. |
+
+### DEFAULTS I AM SETTING (stated, not asked — override any of these if you disagree)
+- **D1 per-action sweep threshold**: report per-action skill only for actions with **n >= 30 clips**
+  in the corpus; everything below is pooled into `other (n<30)` and named. Prevents a repeat of the
+  probe's `cutting (n=4) -3.0` entry being read as a real ranking position.
+- **D2 target**: 3-dim `[F_R, CoPx_R, CoPy_R]` (G1). When quoting ActionSense for comparison I will
+  use its **right-hand** channels only, not the 6-dim mean.
+- **D3 baseline/DC (G4)**: **measured, not assumed.** Step 1 dumps the per-taxel rest-value
+  distribution and the value at frame 0 vs `peak_idx`. Only then do I pick between (a) no
+  correction, (b) causal first-N-frames, (c) whole-clip percentile. If clips start already in
+  contact, (b) is invalid and I will say so rather than apply it.
+- **D4 metrics**: report BOTH skill-vs-persistence AND **R^2 vs the mean** (methodological lesson
+  #4 — skill-vs-persistence is only meaningful when persistence is strong).
+- **D5 clip retention**: every filter (unlabeled 457 clips, clips shorter than history+horizon,
+  low-force CoP masking) reports its drop count in the results table.
+- **D6 layout**: cache mirrors ActionSense (`data/opentouch_states/{state_N.npy, clip_N.npy,
+  manifest.jsonl}`) + adds `scene`, `participant`, `action`, `object_category`, `grip_type` fields
+  to the manifest so the harness loads it via a config swap rather than a rewrite.
+- **D7 OQ6**: I will attempt to copy `docs/predictability_opentouch.csv` back from CRC opportunistically;
+  if it is gone, Step 1 regenerates it for free from the same extracted cache. Not a blocker.
+
+### STATUS: PLAN COMPLETE, AWAITING EXPLICIT GO. Nothing downloaded, no code written yet.
+Next action on GO = Step 0 ONLY (labels zip, ~few MB) -> action x scene table -> return to user
+with shard selection before any 14 GB transfer.
+
+### FOLLOW-UP (2026-08-06): "why only right hand?" — VERIFIED FROM THE PAPER, + A PLAN-BREAKING FINDING
+User challenged the single-hand claim. I re-verified against arXiv:2512.16842 (HTML) rather than
+re-quoting the log, since my claim rested on ONE live shard inspection from 2026-07-02.
+
+**Answer — it is a HARDWARE FACT, not a design choice of ours.** Paper, verbatim:
+> "We instrument only the right dominant hand to simplify hardware and standardize annotations."
+There is no `left_pressure` array in OpenTouch. Confirmed independently by our own live schema dump
+(SESSION_LOG:507-523: `data/<clip>` = right_pressure / camera_poses / rgb_images_jpeg /
+hand_landmarks / timestamps / labels — no left field) and by the upstream loader, which reads
+`right_pressure` only. So D2 (3-dim target) is forced by the data, not chosen.
+Mitigating fact: on ActionSense the RIGHT hand was already the BETTER hand (+0.05 skill over left;
+right-hand `CoP_x` is the single most predictable channel, PROJECT_CONCLUSIONS 5.4) because it is
+the dominant/tool hand. So we lose the weaker half of the ActionSense target, not the stronger.
+
+**NEW FACT 1 — 169 taxels, not 256.** Paper: "a 16x16 electrode grid around a commercial
+piezoresistive film, forming **169 taxels** that uniformly cover the fingers and palmar surface",
+palmar side only. So the 16x16 array carries a **structural dead-taxel mask** (~87 dead of 256),
+exactly like EgoTouch's 217-of-441. Consequence: dead taxels read ~0 and contribute zero weight to
+the F/CoP moments, so the moments stay valid WITHOUT a mask — but any map-model normalization and
+any per-taxel baseline must exclude them, or the dead cells will dominate the statistics.
+Added to the Step-1 inspection list.
+
+**NEW FACT 2 — CLIPS ARE ~1.9 s, NOT ~6.2 s. THIS BREAKS THE OQ3 DECISION.**
+Paper: "Each recording session lasted 5 to 25 minutes, yielding short clips **averaging 57 frames**"
+(= 1.9 s @30 Hz), sampled by pressure dynamics (lowest-pressure pre-peak / peak / lowest-pressure
+post-peak). My earlier ~6.2 s figure was a bad inference (5.1 h / 2,958 clips) that wrongly treated
+total RECORDING time as clip time — **corrected here.** (Residual tension: the paper also says
+"2,900 clips (3 hours)" = 3.7 s/clip. Either way the true value is 1.9-3.7 s, not 6.2 s.)
+Consistency check: our probe computed `persH30` on these clips, so they are >= 30 frames. OK.
+
+**Why this breaks OQ3 (10 Hz, min_history 20, horizon 10):** a 57-frame clip downsampled 3x is
+**19 frames total**. Required = min_history 20 + horizon 10 = 30 frames. **Every clip is discarded.**
+Even a 3.7 s clip gives 37 frames = 7 origins. The 10 Hz / 1 s protocol that made OpenTouch
+directly comparable to ActionSense is **not viable on this corpus.** Options, none yet chosen:
+  (a) **native 30 Hz**, history 0.5 s (15 fr) + horizon 1 s (30 fr) = 45 fr floor -> ~12 origins on a
+      57-frame clip. Keeps the 1 s horizon (the physically meaningful quantity); loses step-count
+      comparability with the ActionSense AR order grid (rescale 2..30 -> 6..90).
+  (b) **shorten the horizon to 0.5 s** at 10 Hz -> 20+5=25 fr floor; still kills a 19-frame clip.
+      Only works combined with (a). => 0.5 s horizon @30 Hz = 15+15 = 30 fr floor, comfortable.
+  (c) accept the loss and keep only the longest clips — must first MEASURE the length histogram.
+**This is now the first thing Step 0/1 must measure**, and it is a cheap measurement: clip lengths
+are derivable from the labels + timestamps without pulling all 26 shards.
+=> OQ3 IS RE-OPENED. The 10 Hz answer stands only if the measured length histogram supports it,
+which the paper says it will not. I will bring the histogram back before committing.
+
+**Net effect on cost (favourable):** at ~57 frames/clip the extracted pressure cache is
+2,958 x 57 x 256 x 2 B ~= **86 MB**, not the ~300 MB I estimated. The 14.6 GB of shards is almost
+entirely `rgb_images_jpeg` (~87 KB/frame x ~169 k frames), which we discard.
+
+### FOLLOW-UP 2 (2026-08-06): "why is history capped at 0.5 s when ActionSense swept 1/2/3/5/10 s?"
+User is right to challenge. Answer, with the numbers measured rather than asserted.
+
+**The cap is NOT a consequence of the 30 Hz rate. It is a consequence of CLIP DURATION.**
+History is a quantity of *real time*. Sampling rate changes the frame COUNT inside a clip, never
+its DURATION. Going 10 Hz -> 30 Hz triples the samples in a 1.9 s clip; it does not create a 4th
+second that is not there. Usable history is capped at `clip_duration - horizon`, full stop.
+
+**MEASURED — ActionSense recording durations** (299 local `state_*.npy`, 30 Hz manifest rate):
+`min 2.7 s | p25 11.4 s | median 22.0 s | p75 45.9 s | max 220.1 s | mean 35.7 s | total 178 min`
+=> a 10 s history costs `(10+1)*30 = 330` frames, affordable against a 660-frame median recording.
+Even so it dropped 24% of recordings (227/299 fit). THAT is why the 1/2/3/5/10 s sweep existed.
+
+**OpenTouch clips are ~10-20x shorter** (paper: mean 57 frames = 1.9 s; the alternative reading
+2,900 clips / 3 h = 112 frames = 3.7 s). Window budget @30 Hz, 1 s horizon, stride 1:
+
+| history | frames needed | clip = 57 fr (1.9 s) | clip = 112 fr (3.7 s) |
+|---|--:|---|---|
+| 0.5 s | 45 | 13 origins -> 38,454 total | 68 origins -> 201,144 total |
+| 1.0 s | 60 | **DEAD** | 53 origins -> 156,774 total |
+| 2.0 s | 90 | **DEAD** | 23 origins -> 68,034 total |
+| 3.0 s | 120 | **DEAD** | **DEAD** |
+| 5 / 10 s | 180 / 330 | **DEAD** | **DEAD** |
+
+So 3/5/10 s history is **physically impossible on OpenTouch at any sampling rate** — it would
+require 4-11 s clips from a corpus whose own paper reports 1.9-3.7 s. 0.5 s is safe under BOTH
+readings; 1 s and 2 s are viable only under the longer reading. **Hence: sweep 0.5 / 1 / 2 s,
+with 1 and 2 contingent on the measured length histogram.** I chose 0.5 s earlier as the only
+value guaranteed to survive the pessimistic reading, not as a rate-imposed ceiling.
+
+**Why this costs us almost nothing scientifically:** the ActionSense ablation already settled
+history length as a non-variable — after early stopping, skill is FLAT across the sweep
+(0.513 @1 s -> 0.502 @10 s, PROJECT_CONCLUSIONS 5.4), and the earlier "more history hurts" claim
+was retracted as an overfitting artifact. 0.5/1/2 s spans the region where any real effect would
+live. The OpenTouch run therefore loses the *dead* end of a sweep already known to be flat.
+
+**THE ONE FACT THAT WOULD OVERTURN THIS** (must be checked in Step 0/1, cheap): the paper says
+recording *sessions* ran 5-25 min. If the HDF5 shards contain those long sessions rather than only
+the curated short clips, the full 1/2/3/5/10 s sweep becomes available and this whole constraint
+evaporates. Current evidence says they do NOT: our live inspection found 113 clips in
+`office_csail_p2.hdf5` and 2,958 across 26 shards, matching the paper's ~2,900 *curated* clips
+(i.e. shard clips == curated clips). Not yet proven — Step 1 will dump the true length histogram
+and settle it. If the long sessions ARE present, I will re-open the history sweep in full.
+
+**Revised OQ3 recommendation** (pending the histogram): native **30 Hz**, horizon **1 s (30 steps)**,
+history sweep **{0.5, 1, 2} s**, AR order grid rescaled 2..30 -> ~6..90 frames. Report the retained
+clip count at each history length as a first-class number (D5).
+
+---
+
+## SESSION (2026-08-07) — STEP 0 EXECUTED: label reconnaissance. TWO PLAN-CHANGING FINDINGS.
+
+### Pre-download decisions (user, AskUserQuestion)
+| Q | Decision |
+|---|---|
+| What to extract | **pressure + Rokoko pose + timestamps + calibration**; discard ONLY `rgb_images_jpeg`. Rationale: pose costs ~15 MB now and a 14.6 GB re-download later; it is also an input channel ActionSense never had. |
+| Shard pass | **stream-extract, delete as it goes** (peak disk ~1 GB, not 14.6 GB) |
+| Drive quota | **log failures, continue, retry pass** (extraction is per-shard + append-only -> resumable) |
+Also measured: **this Mac has only 4.4 GB free** -> the shards physically cannot land here.
+CRC-for-shards / local-for-modelling is now forced, not merely preferred.
+
+### STEP 0 DONE — labels only (459 KB, `final_annotation.zip`). No shards downloaded.
+25 CSVs, **2,958 label rows**, 16 columns:
+`clip_id, object_name, object_category, environment, action, grip_type, description,
+ts_start, ts_end, model, onset_idx, onset_ts, peak_idx, peak_ts, post_idx, post_ts`.
+Annotations are LLM-generated (`model` = `gpt-5`) then human-reviewed.
+**`ts_start`/`ts_end` (ns) let us settle clip length WITHOUT downloading a single shard.**
+
+### FINDING A — clip lengths are FINE. My pessimistic read was wrong; OQ3 resolves favourably.
+| p0 | p5 | p25 | **p50** | p75 | p90 | p99 | max | mean | total |
+|---|---|---|---|---|---|---|---|---|---|
+| 0.53 s | 1.53 s | 2.03 s | **2.80 s** | 4.16 s | 6.33 s | 15.99 s | 45.99 s | 3.65 s | **3.00 h** |
+3.00 h over 2,958 clips reproduces the paper's "2,900 clips (3 hours)" exactly => the paper's
+"averaging 57 frames" refers to its own sampled-frame benchmark, NOT to clip length. My 1.9 s
+figure was wrong; **the correct median is 2.80 s (84 frames @30 Hz)**.
+**History budget @30 Hz, 1 s horizon, stride 1** (clips surviving / origins):
+`0.5 s -> 2829 (96%), 191k · 1 s -> 2251 (76%), 153k · 2 s -> 1298 (44%), 101k ·
+3 s -> 788 (27%), 70k · 5 s -> 328 (11%), 38k · 10 s -> 90 (3%), 12k`
+=> **history sweep {0.5, 1, 2} s is comfortable; 3 s is viable (70k origins).** 5/10 s are not.
+CAVEAT to carry: restricting to long clips SELECTS on action (long clips skew to eating/serving/
+scooping), so the history sweep must report its action mix or the trend confounds with content.
+
+### FINDING B — THE ACTION DISTRIBUTION BREAKS THE PER-ACTION SWEEP, AND IMPEACHES OUR OWN PRIOR RESULT
+66 distinct actions, brutally long-tailed. **Only 14 have n >= 30.** The head is:
+`picking up 974 · placing 253 · pulling 247 · pressing 237 · pushing 154 · holding 119 ·
+grasping 111 · adjusting 89 · turning 84 · touching 82 · moving 78 · removing 57 · sliding 55 ·
+inspecting 32`.
+**Every one of those is in the ABRUPT / make-break class** — the hard end of our trait axis.
+The actions our probe crowned as most predictable are near-empty:
+
+| action | probe PI (2026-07-02) | **n clips** |
+|---|--:|--:|
+| pouring | **+4.4** | **7** |
+| serving | +3.6 | 10 |
+| eating | +3.4 | 8 |
+| stirring | +3.0 | **5** |
+| scooping | +2.5 | 8 |
+| flipping | +2.4 | 12 |
+| wiping | +1.3 | 20 |
+| cutting | -3.0 | 4 |
+
+**=> CORRECTION TO OUR OWN DOCS.** `docs/PROJECT_CONCLUSIONS.md` 4 and
+`docs/ACTION_CATEGORIES.md` 3b quote "pouring +4.4 / serving +3.6 / eating +3.4 / stirring +3.0 /
+scooping +2.5" as the OpenTouch headline supporting the cross-dataset trait claim. We flagged
+`cutting (n=4)` but NOT the top of the ranking, which rests on **5-10 clips per action**.
+OpenTouch's contribution to the trait claim is therefore **far weaker than documented** — it is
+suggestive, not confirmatory. The trait claim still stands on EgoTouch (1,929 clips) and
+ActionSense (299 clips); OpenTouch should be demoted to corroboration pending the measured rerun.
+This must be fixed in both docs. (Not yet edited — flagged to user first.)
+
+**Smooth-class total = 108 clips**, scattered across 21 of 25 scenes (office_ml_p1 21,
+eat_ygf_p2 14, home_kitchen_p1 11, home_kitchen_p3 9, ...) => **no shard subset can capture them**;
+a targeted download is impossible. This settles OQ2: **download all 26 shards.**
+
+### Consequence for OQ1 — the per-action sweep must be REFRAMED (needs user call)
+- The **in-domain refit** (persistence / seasonal / AR / GRU on all clips) is **UNAFFECTED** —
+  it does not depend on the action mix. That half of the plan stands as approved.
+- The **per-action sweep** cannot test the probe's ordering as designed: with D1 (n>=30) it would
+  cover 14 actions that are ALL in the hard class = a restricted-range test with little spread.
+  Options: (a) sweep the 14 n>=30 actions and report it honestly as a hard-class-only test;
+  (b) pooled TRAIT contrast, smooth (108) vs abrupt (2,850), which tests the actual durable claim;
+  (c) both. Recommendation: **(c)**, with (b) as the headline since it matches the real hypothesis.
+
+### Other reconnaissance facts
+- 26 shards vs 25 CSVs: `grocery_target_p3_p4_merged_by_ts` merges two shards into one annotation
+  file. **This is almost certainly the source of the 457 "unlabeled" clips in the 2026-07-02
+  probe** (its join used `<shard_stem>::<group>`, which cannot match the merged prefix).
+  `extract_opentouch.py:label_lookup` handles it with a prefix-containment fallback ->
+  recovers ~15% of the corpus that the old probe silently dropped.
+- Clip-id prefixes: 25 distinct, all exactly matching their CSV stem (verified, no other surprises).
+- `environment`: store 1107 · office 674 · kitchen 293 · workshop 232 · supermarket 229 · home 162
+  · restaurant 108 · bedroom 55 · ... (21 values) -> supports the scene-level held-out split (OQ4).
+
+### BUILT (compile-checked + unit-tested; nothing run on real shards yet)
+- `scripts/extract_opentouch.py` — one shard -> cache (`state_N.npy` (T,1,6) moments,
+  `clip_N.npy` (T,1,16,16) fp16, `pose_N.npy`, append-only `manifest.jsonl` carrying scene/action/
+  grip/object/environment/peak_idx/T/fps_est). Hand axis kept at extent 1 so harness indexing
+  matches ActionSense's (T,2,6). `--taxel-stats` dumps per-taxel activity + p5 rest level.
+  **NO baseline correction applied** — deliberately deferred (D3): the ActionSense DC bug must not
+  be blind-fixed on a different sensor when clips are segmented around a pressure peak.
+- `scripts/crc/stream_opentouch.sh` — labels -> per shard {gdown -> extract -> `rm`} -> summary;
+  `done_ids.txt` / `failed_ids.txt` make it resumable; `--taxel-stats` on shard 1 only.
+- **Unit tests on synthetic (all pass)**: single hot taxel -> CoP equals that cell's coordinate
+  exactly; empty frame -> F=0, CoP=0, all finite (no NaN); sliding blob -> CoPx strictly monotonic
+  with CoPy constant (the stroke signature); 169-live-of-256 dead-taxel grid -> finite moments.
+
+### STATUS
+Step 0 complete. Extraction code ready and tested. **The 14.6 GB shard pass has NOT started** —
+it must run on CRC (this Mac has 4.4 GB free) and I have no SSH, so the user runs one command.
+Awaiting the user's call on the FINDING-B reframe (OQ1) and on fixing the two docs.
+
+### CHALLENGE (user): "download all actions, even though the predictable ones are a small amount?"
+Answered with measurement, and the measurement INVERTS the rationale.
+
+**The predictable subset is not a dataset.** Trait-class totals (hist 0.5 s + 1 s horizon @30 Hz):
+| class | clips | duration | windows |
+|---|--:|--:|--:|
+| SMOOTH / predictable | 108 | **8.2 min** | 9,847 |
+| ABRUPT / hard | 2,850 | 171.8 min | 181,286 |
+| ALL | 2,958 | 180.0 min | 191,133 |
+| *(ActionSense for scale)* | *299* | *177.9 min* | — |
+=> 8.2 min is **22x less** than ActionSense. A forecaster cannot be TRAINED on it. So
+"download only the predictable actions" is not a cheaper experiment, it is **no experiment**.
+The targeted download is also a poor trade on its own terms: the best 7 shards = 3.9 GB (27% of
+the bytes) return only 68% of the smooth clips, because they are spread over 21 of 25 scenes.
+
+**The correct rationale for taking all 26 shards — OpenTouch is the HARD-POLE COMPLEMENT.**
+- ActionSense: 178 min, overwhelmingly SMOOTH (slice/peel/pour/clean).
+- OpenTouch: 172 min, overwhelmingly ABRUPT (picking up/pressing/pulling/grasping).
+- Near-identical duration, opposite poles => together they span the trait axis with ~175 min at
+  EACH end. This is a much stronger position than "more smooth data", which OpenTouch can never
+  supply. It also retires the earlier framing that OpenTouch's value is its predictable actions.
+
+**NEW FALSIFIABLE PREDICTION (the payoff):** the trait hypothesis predicts OpenTouch's overall
+1 s forecast skill should land **clearly below ActionSense's +0.166**, because 96% of its clips
+are abrupt/make-break. If a 96%-abrupt corpus forecasts as well as a smooth one, **the trait claim
+— the project's most portable finding — is falsified.** ActionSense could not run this test (its
+hard actions, jar / get-replace, were a minority). Recorded BEFORE the data is seen.
+
+**Design consequence (resolves the FINDING-B reframe):** train on the FULL corpus, then EVALUATE
+stratified by trait class. 108 clips is too few to train a per-class model but 9,847 windows is
+ample to evaluate on. Holding sensor, pipeline and model constant makes this a CLEANER trait test
+than any cross-dataset comparison. => Option (c) from FINDING B, with the trait contrast as
+headline and the 14-action n>=30 sweep as the secondary, restricted-range view.
+
+**RISK, named in advance:** if OpenTouch skill lands ~0 across the board, the AR-vs-GRU ranking
+test is underpowered (models all near zero are hard to order). Mitigation: 191k windows give power
+at small effect sizes; report CONFIDENCE INTERVALS, not bare point estimates. If the CIs overlap,
+the honest conclusion is "the ranking does not replicate at measurable resolution", NOT a re-rank.
+
+**DECISION CONFIRMED: download all 26 shards.**
+
+### CORRECTION (2026-08-09, prompted by user): "train on full corpus" IS CONFOUNDED FOR THE TRAIT TEST
+User asked why training on the full corpus is reasonable and what stratified evaluation buys.
+The first question exposes a genuine flaw in the design I logged on 2026-08-07. Recording it.
+
+**THE FLAW.** I wrote "train on the FULL corpus, then EVALUATE stratified by trait class". With a
+corpus that is 96% abrupt, a model trained pooled and then scored on the 108 smooth clips gives a
+number with TWO indistinguishable causes: (i) smooth actions are intrinsically harder, or (ii) the
+model hardly saw smooth actions in training. That is a TRANSFER measurement mislabelled as a TRAIT
+measurement. The trait claim cannot be tested that way.
+
+**THE FIX — the two experiments need DIFFERENT training designs. They were conflated.**
+- **E1 sensor-independence** (does AR > GRU > CNN-map > persistence replicate on a 2nd sensor?):
+  question is about MODEL FAMILIES, not action classes. Fit on the FULL corpus; the action mix is
+  simply what OpenTouch is. **Pooled training is CORRECT here.** Unchanged from the approved plan.
+- **E2 trait test** (are smooth actions more forecastable?): pooled training is the WRONG tool.
+  Use only estimators with no cross-class contamination:
+  1. **Training-free**: persistence nMSE @1 s and R^2-vs-mean, per class. No fitting => no confound.
+     (This is exactly why the Phase-C probe result was clean, and it is the honest primary metric.)
+  2. **Linear AR fit PER CLASS** (`fit_scope`): each class gets coefficients from its own data.
+     Smooth = 9,847 windows, ample for AR(90) x 3 channels; abrupt = 181,286. Unconfounded, and AR
+     is our best model anyway (it won the four-way comparison).
+  3. **Pooled GRU is reported for E1 ONLY**, flagged as confounded by class imbalance for E2.
+- SCOPE NOTE: the ActionSense config uses `fit_scope: group` = action x object, which is too fine
+  for OpenTouch's rare actions (stirring n=5). **E2 fits at TRAIT-CLASS scope (2 groups)**; the
+  n>=30 per-action sweep fits at action scope where the counts support it.
+
+**WHY STRATIFY AT ALL (answering the second question).** The pooled average is structurally
+incapable of expressing the finding. If the truth were smooth +0.22 / abrupt +0.06, the aggregate
+is `0.96*0.06 + 0.04*0.22 = 0.067` — indistinguishable from the abrupt number alone. A real 3.7x
+class difference vanishes into one digit because the 96% majority swamps it. Every claim in this
+project is about DIFFERENCES BETWEEN KINDS OF ACTION, so on the trait question the stratification
+is not post-hoc analysis layered on the result — **it IS the result**.
+
+**Net effect on the download decision: NONE.** Both E1 (needs maximum data) and E2 (needs both
+poles present, per-class fitting) want the full corpus. All 26 shards still stands.

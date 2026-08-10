@@ -2560,3 +2560,256 @@ terminal and is still OUTSTANDING.
 **METHOD NOTE:** the scene-vs-label table is what caught this; a bare clip count (2,666 of 2,958)
 looked merely incomplete. Any future cache build must be verified per-scene against the labels,
 not by total count. Added as a standing check.
+
+---
+
+## SESSION (2026-08-10续) — CONFIG + LOADER 架构定稿,TRAIN PLAN 完整记录,新增开放问题
+
+### 用户的强约束(覆盖了我此前的"零风险机械替换"提案)
+用户明确要求:**`src/actionsense/` 下任何文件一个字节都不准改**,哪怕改动在数学上对 ActionSense
+可证明是 no-op(字面量 6 -> `len(cfg.channels)`,ActionSense 自己 channels 长度就是 6)。
+理由未强制要求,但与本项目一贯的"frozen harness"文化一致(参见 `categorize_phrase()` 新增而不
+改 `categorize()`、EgoTouch/OpenTouch/ActionSense 用独立 probe driver 而非共享一份改出分支)。
+**采纳,不再论证"风险可控",按用户决定执行。**
+
+### 逐文件核实结果(读完 `src/actionsense/eval_harness/` 全部源码后)
+| 文件 | 硬编码 6? | 处理方式 |
+|---|---|---|
+| `config.py` (`Config`/`load_config`) | 无 | **import 复用**(零 ActionSense 专属逻辑) |
+| `dataset.py::Norm` / `force_thresholds` | 无(形状由数据推导) | **import 复用** |
+| `dataset.py::load_target` / `group_keys` | 硬编码双手 / 解析 `"Slice a cucumber"` 字符串 | 不复用,OpenTouch 自己重写(数据格式本就不同,不是"改 ActionSense") |
+| `baselines/persistence.py` | 无(`np.repeat` 形状随输入) | **import 复用** |
+| `baselines/__init__.py` | 无(纯注册表) | 新建 OpenTouch 版,内部 import 上面两个未改的 + 下面 fork 的 |
+| `masking.py` | 有,1 处:`np.ones((N,6))` | **fork** -> `np.ones((N, C))` |
+| `metrics.py` | 有,4 处:`.reshape(-1,6)` | **fork** -> 从 `mask.shape[-1]` 推导,不需要传 cfg(保持这些函数纯数组运算的设计) |
+| `baselines/base.py` | 有,1 处:空语料兜底 `np.zeros((0,H,6))` ×2 | **fork** -> `len(cfg.channels)` |
+| `baselines/ar.py` | 有,4 处:系数矩阵形状、`range(6)`、`buf` 补零、输出数组 | **fork** -> `len(self.cfg.channels)` |
+| `baselines/seasonal.py` | 有,1 处:输出数组 `np.empty((H,6))` | **fork** -> `len(self.cfg.channels)` |
+| `evaluate.py` | 有,6 处:mask reshape、`range(6)`、shape 校验消息 | **fork** -> `len(cfg.channels)` |
+
+### 新建文件清单(全部路径)
+```
+configs/opentouch/eval_harness.yaml     新建,结构对齐 configs/actionsense/eval_harness.yaml,数值重算
+src/opentouch/__init__.py               新建,空
+src/opentouch/dataset.py                新建(非 fork)—— load_target(单手 (T,1,6)->(T',3))、
+                                         group_keys(按 object_category)、eligible_clips(时长过滤)
+src/opentouch/masking.py                fork of src/actionsense/eval_harness/masking.py
+src/opentouch/metrics.py                fork of src/actionsense/eval_harness/metrics.py
+src/opentouch/evaluate.py               fork of src/actionsense/eval_harness/evaluate.py
+src/opentouch/baselines/__init__.py     新建 —— import Persistence(未改,来自 actionsense)+
+                                         本地 SeasonalNaive/AR(fork)+ base 的 Baseline/predict_series/origins(fork)
+src/opentouch/baselines/base.py         fork of .../baselines/base.py
+src/opentouch/baselines/ar.py           fork of .../baselines/ar.py
+src/opentouch/baselines/seasonal.py     fork of .../baselines/seasonal.py
+tests/test_harness_opentouch.py         新建 —— 把 tests/test_harness.py 的 5 类单测(seasonal精确
+                                         恢复/AR系数恢复/masking/causality/seasonal fallback)在 3
+                                         通道下对 fork 版本重跑一遍,证明 fork 与原版行为一致
+src/opentouch/splits.py                 尚未建 —— 阻塞于 p1/p2 语义未定(见下)
+```
+**代价明确记录**:fork 出的 6 个文件与 ActionSense 原文件短期内存在重复代码;若日后在
+`src/actionsense/eval_harness/` 发现 bug,这 6 个 fork 不会自动同步,需要人工对照修。用户已确认
+接受这个代价,换取"绝不触碰已发表结果的代码路径"。
+
+### CONFIG 最终数值(`configs/opentouch/eval_harness.yaml`)
+| 字段 | 值 | 依据 |
+|---|---|---|
+| `channels` | `[F_R, CoPx_R, CoPy_R]` | 只有右手(arXiv:2512.16842 verbatim) |
+| `force_idx` / `cop_idx` | `[0]` / `[1,2]` | 同上 |
+| `fps_raw` / `downsample` | `30.0` / `1` | 实测 fps_est 全语料中位数 30.01(2026-08-10 corrupted-but-rate-valid 那次运行确认),原生使用 |
+| `horizon_s` | `1.0`(=30步) | 与 ActionSense 物理时长一致 |
+| `ar_orders` | `[6,15,30,45,60,90]` | ActionSense `[2,5,10,15,20,30]`@10Hz 的物理秒数(0.2~3.0s)按 30Hz 等比换算 |
+| `seasonal_period_min/max_s` | `0.3` / `3.0` | 保持不变(人手动作周期的先验假设,与传感器无关) |
+| `fit_scope` | `object_category` | Q2 用户确认(14 类,样本比 action×object 均衡) |
+| `min_history` | `15` 帧(0.5s@30Hz) | Q3 用户确认,覆盖 96% clip |
+| `actions` | `[]`(不过滤) | 训练语料 = 全部 2,958 条(此前"用全部的2958"决定) |
+| `split` | 占位,**不生效** | 阻塞见下 |
+
+### SPLIT 现状:仍然阻塞
+`p1`/`p2` 到底是participant还是session,论文/仓库均未回答。用间接证据(同地点 p 变体间
+`object_name` 重叠率仅 1%-17%;`hardware_homedepot_p5` 一个 shard 内 `environment` 标签跨
+store/kitchen/garage,说明 shard=一次连续外出行程而非固定地点)双向都说得通,**无法判定**。
+后续路径:下载完成后查 HDF5 `calibration` 字段;仍不行则邮件作者 `rayxsong@mit.edu`。
+`src/opentouch/splits.py`(分层 train/val/test 划分)**不写**,直到本项解决。
+
+### HISTORY SWEEP(第三件事,今天不建,仅记录已确认的参数)
+不属于 frozen harness(AR 自选阶数,不需要 history 字段)。属于未来的 GRU-aggregate/
+action-dynamics 移植脚本。用户确认:sweep 用固定子集(hmax=3s,788 条,91.4 分钟,动作构成
+top5 picking-up/placing/pulling/pressing/holding,未坍缩成单一动作)+ history 值 **{1,2,3}s**
+(我的理解:0.5s 不进 sweep,只作为 frozen harness 的 min_history floor,已在下方开放问题中列出待
+确认)。ActionSense 原 sweep 是 {1,2,3,5,10}s;5s/10s 在 OpenTouch 上会把子集砍到 328/90 条,
+动作多样性坍缩,弃用是有意为之,不是遗漏。
+
+### TRAIN PLAN —— 三个待验证结论 G1/G2/G3,以及各自的验证方法
+"验证 generalizability" 拆成三个强度递减的主张:
+
+**G1 — 排序可跨传感器复现**:AR > GRU-aggregate > persistence(> seasonal,预期 inert)在 OpenTouch
+上是否成立。**验证方法**:在全部 2,958 条(pooled,不分 trait class)上重跑同一套 frozen harness
++ 一个新训练的 GRU-aggregate(权重从零开始,不借用 ActionSense 权重——G1 测的是"算法排序",不是
+"权重可迁移")。AR 按 `object_category` 分组拟合。指标:skill-vs-persistence 为主(这是 ActionSense
+原协议,此处目的就是复现同一协议,合理),R² 作为交叉验证的次要读数。
+
+**G2 — trait 成立**(平滑力比突变力更好预测)。**验证方法**:不能用 pooled 训练的模型评估
+(2026-08-09 已记录这个混淆的修正)。改用:(a) training-free 指标(persistence nMSE、R²-vs-mean),
+按 trait class 直接算,零拟合零混淆;(b) 按 trait class **分别拟合**的 AR(smooth 9,847 windows,
+abrupt 181,286 windows,样本都够 AR(90)×3通道)。Pooled GRU **不用于 G2**,只用于 G1。
+**预注册的可证伪预测**(2026-08-09 记录,早于看到任何数据):OpenTouch 整体 skill 应明显低于
+ActionSense 的 +0.166,因为 96% 的 clip 是 abrupt 类;若两者相当,trait 主张证伪。
+
+**G3 — 权重迁移**:**尚未获得用户批准**。我在 2026-08-10 建议从"zero-shot 直接推理"改为
+"ActionSense 预训练 + OpenTouch 微调 vs 从零训练"对比(理由:力的量纲、传感器几何、动作分布都不
+同,zero-shot 数字失败了也无法归因;微调对比是 EgoTouch 阶段 pretraining 把 LOTO 从 ≈0 拉到
++0.097 的同一设计),但这个改动从未得到用户明确 yes/no,**记为开放问题,见下**。
+
+### REPRESENTATION / MODELS / METRICS 迁移的完整表述
+- **Representation**:`[F, CoP_x, CoP_y]` 解析物理量,公式与 `src/actionsense/physical_state.py`
+  完全一致(已在 `extract_opentouch.py::moments` 里独立实现并单测验证等价)。CoP 已归一化到
+  `[-1,1]`,跨传感器几何可比;**F 是未标定的任意单位**(OpenTouch FPC 0–3072 vs ActionSense 导电
+  线另一套标度),任何跨语料的 F 数值比较必须先各自 z-score,原始单位不可比。
+- **Models**:persistence/seasonal/AR 结构完全可迁移,不存在"迁移"的概念——就是同一算法在
+  OpenTouch 自己的 TRAIN 上重新拟合。GRU-aggregate 架构可迁移(输入维度 6→3 是平凡改动),G1 用
+  从零训练的权重,G3(如果批准)才会真正用到 ActionSense 训好的权重做起点。
+- **Metrics**:见下方开放问题——不是简单"迁移",这里有一个此前对话里被我低估的真实问题。
+
+### 开放问题清单(未解决,按重要性排序,需要用户逐一确认)
+
+**OQ-A(重要,影响 G2 结论怎么写)—— skill-vs-persistence 对 G2 是结构性偏的,R² 应为 G2 的主指标。**
+`PROJECT_CONCLUSIONS §7` 第4条已经记过:skill-vs-persistence 只有在 persistence 是"强" baseline
+时才有意义;当年 ActionSense 的 fast-target 上 persistence 比 predict-mean 还差(§5.5),skill 被
+系统性抬高。这个陷阱在 OpenTouch 的 G2 上**更致命**,因为 smooth/abrupt 两个 class 的 persistence
+强度**本来就不同**(smooth = 力变化慢 = persistence 天然强;abrupt = 突变 = persistence 天然弱,
+这就是"abrupt"的定义本身)。也就是说:即使模型在两个 class 上的**真实**预测能力毫无差别,
+skill-vs-persistence 也会显示 smooth 更高——因为分母(persistence 的 MSE)结构性更小。
+**这不是"也报告一下 R²"能解决的**(我 08-09 的说法不够精确),而是:**G2 的结论必须以 R²-vs-mean
+为准,skill-vs-persistence 只能作为诊断性的次要数字**,否则整个 trait 论证可能是在测量
+persistence 强度的差异,而不是模型能力的差异。这个问题此前完全没讨论过,需要你确认这个判断。
+
+**OQ-B(新发现,此前完全没讨论过)—— OpenTouch clip 是围绕力峰值构造的,均匀滚动窗口可能被
+"无聊片段"稀释。** 论文原话:"we sample frames by pressure dynamics: lowest pressure pre-peak
+(approach), peak pressure (manipulation), and lowest pressure post-peak (release)"——即每条 clip
+天生包含一次力的剧烈变化,而且标注里就有 `onset_idx`/`peak_idx`/`post_idx` 三个位置。如果按现在
+的设计(stride=1 均匀滚动取 origin),大多数窗口会落在峰值前后的"平淡"区间,只有少数窗口真正跨越
+那次转变——预测能力的信号可能被平淡窗口稀释、模糊了我们真正关心的"转变时刻附近可预测吗"这个问题。
+这和本项目此前几次"想当然的设计被数据打脸"(resampling artifact、DC offset、非因果 filtfilt)是
+同一类风险,值得同等重视。**要不要按 `peak_idx` 邻近程度对 origin 分层/加权?还是先不处理,留作
+诊断项?** 这个问题需要你决定,我没有默认值。
+
+**OQ-C(工程细节,影响聚合方式)—— per-window 还是 per-clip 聚合?**
+现有 `metrics.py` 是把所有 (origin, horizon-step) 对等地汇总(`.reshape(-1,C).sum(0)`)。OpenTouch
+clip 长度差异比 ActionSense 大得多(最短 16 帧,最长 1380 帧),等权重汇总意味着**长 clip 主导
+指标**,短 clip(往往是最"abrupt"的那类)权重被稀释。是否要改成先按 clip 算指标、再对 clip 取平均
+(每条 clip 权重相等)?这个选择会实质影响 G2 的数字,需要你决定。
+
+**OQ-D(方法论)—— 置信区间怎么算?**
+2026-08-09 已提过"如果 OpenTouch skill 接近 0,AR vs GRU 排序检验的统计功效不足,要报 CI 不能只
+报点估计"。具体怎么算 CI 还没定:我建议 **bootstrap 按 clip 重采样**(不是按 window),因为同一
+clip 内的 window 高度自相关——这正是"可预测性"这个概念本身的含义,按 window 重采样会低估方差、
+给出过窄的 CI。这是我的建议,需要你确认。
+
+**OQ-E(轻量,建议但非阻塞)—— seasonal-naive 要不要算?**
+ActionSense 上 seasonal-naive 被发现完全 inert(5 组全部 fallback 到 persistence)。OpenTouch clip
+更短,大概率更 inert。建议仍然计算(fork 已经顺带做了,零额外成本),把"是否复现同一个 null
+result"当作一个确认性检查而不是主结果。默认会做,除非你反对。
+
+**OQ-F(未解决,此前只是我单方面提议)—— G3 到底做不做,做哪个版本?**
+见上方 G3 段落。需要你明确 yes/no:(a) 不做迁移实验,只做 G1+G2;(b) 做"ActionSense 预训练 +
+OpenTouch 微调 vs 从零训练"对比;(c) 其他方案。
+
+**OQ-G(小,确认我的理解)—— GRU-aggregate 是点预测还是概率预测?**
+我的理解:G1 的 GRU-aggregate 应该是**点预测**(和 AR/persistence 同协议,只算 skill,不算
+coverage),对应 `PROJECT_CONCLUSIONS §6.4` 描述的四路对比里的那个 GRU,而不是 `action_dynamics.py`
+里 mean+logvar 的概率版本(那是另一条线,且已经决定不迁移 tactile-map 分支)。如果理解有误请纠正
+——这决定了 `src/opentouch/metrics.py` 要不要顺带移植 coverage 计算(目前判断不需要)。
+
+**OQ-H(小,确认 history sweep 细节)**:上方"HISTORY SWEEP"一节里我的理解是 sweep = {1,2,3}s,
+0.5s 只当 min_history floor 不进 sweep——如果你的意思是 sweep 也包含 0.5s(即 {0.5,1,2,3}),
+请指出。
+
+### 本次会话代码状态
+以上均为设计与记录,**代码尚未开始写**——下一步开始按已获批准的部分(configs yaml + `src/opentouch/`
+新建/fork 文件 + 对齐单测)动手实现,实现后会用 `tests/test_harness_opentouch.py` 证明 fork 版本
+与原版数值行为一致(仿照 `tests/test_harness.py` 的 5 类测试,通道数从 6 改成 3 重跑)。
+
+### 2026-08-10续2 —— CONFIG + LOADER 已实现并验证;发现一个新的开放问题(OQ-I)
+
+**已建文件**(均已写完,`src/actionsense/` 确认零改动 —— `git status --short src/actionsense/`
+输出为空):
+```
+configs/opentouch/eval_harness.yaml     数值见上方 CONFIG 表格
+src/opentouch/__init__.py               空
+src/opentouch/dataset.py                新建:load_target/group_keys/eligible_clips
+                                         + import 复用 Norm/force_thresholds(未改)
+src/opentouch/masking.py                fork,1 处 6->C(从 mask.shape 推导)
+src/opentouch/metrics.py                fork,4 处 6->mask.shape[-1]
+src/opentouch/evaluate.py               fork,6 处 6->len(cfg.channels);main() 因
+                                         splits.py 未建而 NotImplementedError,但
+                                         fit_and_forecast/build_rows/score_external
+                                         均可独立调用测试
+src/opentouch/baselines/__init__.py     新建:import 未改的 Persistence + 本地 fork
+src/opentouch/baselines/base.py         fork,1 处(空语料兜底形状)
+src/opentouch/baselines/ar.py           fork,4 处
+src/opentouch/baselines/seasonal.py     fork,1 处
+tests/test_harness_opentouch.py         新建:tests/test_harness.py 的 5 类单测在 3
+                                         通道下对 fork 重跑
+```
+
+**验证**:`pytest tests/test_harness.py tests/test_harness_opentouch.py` —— **14/14 通过**
+(原 7 个字节不动,新 7 个在 3 通道下复现同样的性质:seasonal 精确恢复/AR 系数恢复/masking 正确/
+因果性/seasonal fallback)。另外用合成 manifest(12 条,4 个 `object_category`,状态数组随机
+生成)跑通 `dataset.eligible_clips`/`group_keys`/`load_target` + `evaluate.fit_and_forecast`
+端到端,determinism check(两次跑结果逐字节相同)通过。
+
+**OQ-I(新发现,写分层抽样的 `splits.py` 时必须处理)—— AR 对"只在 VAL/TEST 出现、TRAIN 没见过
+的组"会直接 `KeyError` 崩溃。**
+第一次合成测试故意让 `"jar"` 只出现在 VAL、不出现在 TRAIN,复现了这个崩溃:`_best_order` 会给
+陌生组临时设置 order,但 `self.coef` 里从未 fit 过该组,`predict()` 里 `self.coef[group][p]`
+直接 `KeyError`。**这不是 fork 引入的新 bug**——`src/actionsense/eval_harness/baselines/ar.py`
+的 `_best_order`/`predict` 逻辑完全一样,同样输入会同样崩溃;只是 ActionSense 用 `action×object`
+分组只有 5 组,标准分层抽样几乎不可能让某组只出现在 VAL/TEST。**OpenTouch 换成 `object_category`
+(14 组,部分类别样本很少,如未来若改用更细的 `action` 分组,`stirring` 只有 5 条)之后,这个边界
+情况现实存在**。补一份"每个类别在 train/val/test 都至少出现一次"的合成数据后,pipeline 端到端跑
+通、determinism 校验通过——证明问题只在"组未覆盖"这个边界,不在 fork 本身。
+**需要在设计 `src/opentouch/splits.py` 时解决,两个方向,需要你选:**
+- (a) **分层抽样时强制保证** train 覆盖 val/test 出现的每一个 `object_category`(样本数极少的
+  类别,例如只有 1-2 条的,直接归并到一个 `"other"` 类别,不单独分组);
+- (b) **让 AR 对陌生组更健壮**——遇到 `self.coef` 里没有的组,退回全局 pooled 系数或退回
+  persistence,而不是崩溃。
+我倾向 (a),因为它更简单、更透明(崩溃总比静默退化成 persistence、不留痕迹地稀释结果更安全),
+但这个决定应该在写 `splits.py` 之前定,现在先记录,不阻塞今天的 config/loader 工作。
+
+### 待用户确认的问题总清单(截至本次)
+OQ-A(G2 应以 R² 为主指标,skill-vs-persistence 结构性偏)、OQ-B(clip 围绕力峰值构造,均匀
+窗口是否稀释信号)、OQ-C(per-window 还是 per-clip 聚合)、OQ-D(bootstrap 按 clip 还是按
+window)、OQ-E(seasonal-naive 要不要算,默认做)、OQ-F(G3 zero-shot 改成 fine-tune,是否批准)、
+OQ-G(GRU-aggregate 点预测还是概率预测,我倾向点预测)、OQ-H(history sweep 是否含 0.5s)、
+**OQ-I(新增,split 未覆盖组的处理方式,倾向方案 a)**——均未拍板,继续讨论。
+
+### 2026-08-10续3 —— OQ-I 落地(方案a),顺带纠正 Q2 的一个事实错误
+
+用户确认 OQ-I 用方案 (a)。实现前先测了真实的 `object_category` 分布(此前从未测过)——发现
+**Q2 当时"14 类,样本均衡"的说法是错的**:`object_category` 实际有 **110 个不同值**,长尾程度
+不亚于 `action`(81/110 类 n<30,39 类 n<10,若干 n=1 如 `oven`/`sock`/`joystick`)。当时是把
+"14 个 n≥30 的 action"这个数字错套到了 object_category 上,从未单独测过。已在
+`configs/opentouch/eval_harness.yaml` 的注释里纠正。
+
+**阈值权衡**(实测):n≥10 保留 71 类、`other` 仅 6%;n≥30 保留 29 类、`other` 32%;n≥50 保留
+17 类、`other` 47%。选 **n≥30**(与项目已有的"可靠动作"门槛一致),写成 `min_group_size: 30`,
+可配置,不是写死的常量。
+
+**实现**(`src/opentouch/dataset.py`):
+- `category_counts(cfg, field)` —— 对**全量 manifest**(不是当前查询的 idx 子集)统计每个类别的
+  clip 数。刻意设计成与子集无关:否则同一个稀有类别在只查小子集时可能被错误地当作"未出现过"而不是
+  "已知稀有",分类结果会随调用方式漂移。
+- `group_keys` 新增合并逻辑:corpus-wide 计数 < `min_group_size` 的类别一律并入 `"other"`;
+  空值仍归 `"unknown"`(不与 `"other"` 混淆——空值是标注缺失,稀有类别是标注存在但样本少,两者
+  语义不同,合并会掩盖数据质量问题)。
+- `missing_groups(train_groups, other_groups)` —— OQ-I 方案 (a) 的运行时校验工具,和 split 轴
+  (scene/clip/participant)完全无关,`splits.py` 定下轴之后可以直接调用,不用改这个函数。
+
+**单测**(合成数据:5 条 handle / 2 条 cup / 1 条 oven / 1 条空值,`min_group_size=3`):
+`category_counts` 正确统计;`group_keys` 下 handle 保留、cup+oven 并入 other、空值归 unknown;
+**稳定性检验**——只查询那 2 条 cup 中的 1 条,分类结果仍是 `other`(证明用的是全量计数,不是
+子集计数);`missing_groups` 在覆盖完整时返回空集,在故意制造缺口时正确返回 `{"other"}`。全部
+通过。回归:`pytest tests/test_harness.py tests/test_harness_opentouch.py` 仍 14/14 通过,
+`src/actionsense/` 仍零改动。
+
+`src/opentouch/splits.py` 本体依然阻塞于 p1/p2(split 轴未定),不受本次影响。

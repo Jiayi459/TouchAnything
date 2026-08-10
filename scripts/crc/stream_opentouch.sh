@@ -20,13 +20,32 @@
 set -uo pipefail
 
 WORK="${1:-$HOME/opentouch}"
-SHARDS="$WORK/shards"
 CACHE="$WORK/cache"
 LABELS="$WORK/final_annotations"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PY="${PYTHON:-python}"
 
+# --- single-instance lock -----------------------------------------------------
+# 2026-08-10: two concurrent runs corrupted the first cache. Both saw an empty
+# done_ids.txt and re-extracted the same shards; both computed the same next index
+# from the same manifest and OVERWROTE each other's state_N.npy; and each wiped the
+# shared shard dir at the top of its loop, deleting the other's download (which is
+# what the 19 spurious "failures" were). Result: 4,511 manifest rows for a 2,958-clip
+# corpus, with a broken row->file mapping. Never again: mkdir is atomic on NFS.
+LOCK="$WORK/.stream.lock"
+mkdir -p "$WORK"
+if ! mkdir "$LOCK" 2>/dev/null; then
+    echo "FATAL: another run holds $LOCK"
+    echo "  If no stream_opentouch.sh is running (check: pgrep -fa stream_opentouch.sh),"
+    echo "  remove it with:  rmdir $LOCK"
+    exit 1
+fi
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+
+# Per-instance shard dir, so even a forced second run cannot delete our download.
+SHARDS="$WORK/shards.$$"
 mkdir -p "$SHARDS" "$CACHE"
+trap 'rm -rf "$SHARDS"; rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
 
 IDS=(
     "1EjMOzs45devBo0TqhuhZTT_Ll7HZ1lrW" "1fAmmieSr0yFm7ldhW7Smld7jUxBCw8fu"
@@ -47,6 +66,7 @@ LABELS_ID="1cM-816vcCnkgWVIGXZrR1o8TPsDvRVCZ"
 FAILED="$WORK/failed_ids.txt"
 DONE="$WORK/done_ids.txt"
 touch "$DONE"; : > "$FAILED"
+sort -u -o "$DONE" "$DONE"          # collapse any duplicates left by earlier runs
 
 # ---- labels first (459 KB) -------------------------------------------------
 if [ ! -d "$LABELS" ]; then

@@ -2512,3 +2512,51 @@ is not post-hoc analysis layered on the result — **it IS the result**.
 
 **Net effect on the download decision: NONE.** Both E1 (needs maximum data) and E2 (needs both
 poles present, per-class fitting) want the full corpus. All 26 shards still stands.
+
+### 2026-08-10 — FIRST EXTRACTION RUN PRODUCED A CORRUPT CACHE. TWO BUGS, BOTH MINE. FIXED.
+User's scene table (cache vs labels) exposed it: `have` is an exact multiple of `want` for most
+scenes — grocery_plant 140/70, office_ml_p1 662/331, sports_dicks 460/230 (2x);
+hardware_homedepot_p5 552/184 (3x) — while home_bedroom 138/138 and office_csail_p2 113/113 are
+correct. **Summing `have` = 4,511 manifest rows for a corpus of 2,958 clips.** More clips than
+exist => definitive over-extraction. Meanwhile only 2,666 `state_*.npy` files exist on disk.
+
+**BUG 1 — CONCURRENT RUNS (no lock).** The user legitimately started the script more than once
+while working out screen/tmux/nohup. Consequences, all three of which the script permitted:
+  (a) each instance read an empty/stale `done_ids.txt` -> re-extracted the same shards;
+  (b) `next_index()` read the same manifest in both -> both wrote the SAME `state_N.npy`
+      filenames -> **files overwrote each other, so the manifest row -> file mapping is broken**
+      (4,511 rows vs 2,666 files). This is why no dedupe can repair the cache;
+  (c) `rm -f "$SHARDS"/*.hdf5` at the top of each loop deleted the OTHER instance's in-flight
+      download -> **the 19 "failures" were self-inflicted, not Drive quota.**
+**BUG 2 — LABEL JOIN COLLISION (`p1`/`p2`).** The log shows shards `sports_dicks_p1` AND
+`sports_dicks_p2`, but there is only ONE `sports_dicks` CSV. My prefix-containment fallback let
+BOTH `p1::demo_000` and `p2::demo_000` claim the same annotation row, so one of them carried a
+WRONG action/grip label. Independent of the concurrency bug, and worse: it is silent. My
+2026-08-07 note claimed this fallback "recovers ~15% of the corpus" — it was also corrupting it.
+
+**FIXES (committed; compile-checked + unit-tested).**
+1. `stream_opentouch.sh`: atomic `mkdir` lock (`$WORK/.stream.lock`, NFS-safe) with EXIT/INT/TERM
+   trap and an explicit stale-lock message; **per-instance shard dir `shards.$$`** so no run can
+   delete another's download; `sort -u` on `done_ids.txt` to collapse earlier duplicates.
+2. `extract_opentouch.py`: **join by TEMPORAL OVERLAP, not by name.** The CSV carries
+   `ts_start`/`ts_end` (ns) and every clip carries `timestamps`, so the join is exact and
+   name-independent — evidently how the authors merged p3/p4 (`..._merged_by_ts`). Rules: exact
+   key accepted only if it genuinely overlaps (>=50% of the clip span); otherwise best-overlap row;
+   **a label row may be claimed by at most one clip**; no overlap => reported MISS, never a
+   silent wrong label. Manifest now records `label_cid` + `join` method + overlap fraction.
+3. `extract_opentouch.py`: **idempotent** — `read_manifest()` returns the set of already-extracted
+   `<shard>::<group>` keys and claimed label cids; re-running after an interrupt skips instead of
+   duplicating.
+**Unit tests (pass):** p1/p2 same group name at different times -> each gets its OWN correct row
+(`pulling` / `pouring`); a claimed row is never handed out twice; a non-overlapping clip returns
+MISS rather than a wrong label. Plus the earlier moment tests still hold.
+
+**CONSEQUENCE: the cache must be REBUILT from scratch (~14.6 GB re-download).** Unavoidable —
+(b) means row->file identity is lost, and (2) means an unknown subset of labels is wrong. Deleting
+`~/opentouch/cache` and re-running is the only sound path. Cost is time, not data.
+**Confirmed good so far:** `fps est` median **30.01 Hz** on every shard (min 30.00, max 30.01) =>
+the native-30 Hz / 1 s-horizon plan stands. The `taxels:`/DC-offset line was truncated in the
+terminal and is still OUTSTANDING.
+**METHOD NOTE:** the scene-vs-label table is what caught this; a bare clip count (2,666 of 2,958)
+looked merely incomplete. Any future cache build must be verified per-scene against the labels,
+not by total count. Added as a standing check.

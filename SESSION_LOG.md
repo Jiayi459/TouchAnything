@@ -2813,3 +2813,336 @@ OQ-G(GRU-aggregate 点预测还是概率预测,我倾向点预测)、OQ-H(histor
 `src/actionsense/` 仍零改动。
 
 `src/opentouch/splits.py` 本体依然阻塞于 p1/p2(split 轴未定),不受本次影响。
+
+---
+
+## SESSION (2026-08-11) — OQ-A~H 全部拍板;TRAIN PLAN v2(完整操作化,待 review,未动代码)
+
+### OQ 拍板结果(用户 2026-08-11 逐条回答,原样记录)
+| OQ | 结论 |
+|---|---|
+| A | **G2 指标三层**:primary = class-specific R²(`R²=1-SSE_model/SSE_mean`)+ ΔR²=R²_smooth-R²_abrupt;secondary = raw MSE/MAE;diagnostic-only = skill-vs-persistence。G2 的结论以 R² 为准,MSE/MAE 佐证,skill-vs-persistence 仅供参考不参与推断。 |
+| B | **不做** peak-proximity 加权;记入"可继续改善"章节,效果不理想时再启用。 |
+| C | 同意 per-clip 等权聚合(不按 window 数加权)。 |
+| D | 同意 **clip-level bootstrap**;模型对比(G1)用 **paired** clip bootstrap;理由:海量 rolling window 不是独立样本,近似独立的单位是 clip,按 window 重采样会把高度自相关的观测当独立样本,严重低估方差。 |
+| E | seasonal-naive 做,但非主结果(诊断性复现检查)。 |
+| F | G3(迁移/微调)**暂不做**。 |
+| G | GRU-aggregate 用**点预测**,不做概率版本。 |
+| H | history sweep 保持 **{1,2,3}s**(0.5s 不进 sweep,只作 frozen harness 的 min_history floor)。 |
+
+以下是把这些答案操作化时浮现的具体设计问题——**这些不是新的开放式讨论,是把已拍板的结论落成
+可执行步骤时必须钉死的实现细节**,逐一列出、逐一给出我的建议,请你确认或修正。
+
+---
+
+### 实操细节 1 —— R²/ΔR² 的精确定义(答案里的公式没写全)
+
+**"SSE_mean"里的 mean 是谁的均值?** 沿用本项目一贯的"no-leakage"约定(`Norm` 全部用 TRAIN 统计量,
+`force_thresholds` 同理)——`SSE_mean` 必须是**用 TRAIN 集算出的均值**去预测 TEST,不能用 TEST
+自己的均值(那样会泄漏 TEST 的信息进基线,数字会虚高)。**建议**:R² 的 mean baseline = 每个
+channel 在 TRAIN 上的均值(逐 channel,不是全局一个数)。
+
+**R² 要不要按 channel 分开报?** F(力,大数值)和 CoP(位置,`[-1,1]`)量纲完全不同,混在一起算
+一个 R² 没有意义。**建议**:R²/ΔR² 逐 channel 报(`F_R`/`CoPx_R`/`CoPy_R` 各一个数),外加一个
+三通道算术平均作为"headline 一个数",方便快速读——但结论以逐 channel 的表格为准,不能只看那个
+平均数(万一 CoP 有 trait 效应、F 没有,平均会把这个故事抹掉)。
+
+**问你(Q1)**:这两条约定(TRAIN-mean baseline;逐 channel 报告 + 均值作 headline)是否同意?
+
+### 实操细节 2 —— per-clip 聚合具体怎么实现(OQ-C 定了"要不要",没定"怎么算")
+
+现状:`predict_series`(`src/opentouch/baselines/base.py`)把所有 clip 的所有 window **拼成一个大
+数组**返回,一旦拼完,clip 的身份就丢了——`metrics.py` 拿到手时已经不知道哪几行属于哪条 clip。
+要做到"每条 clip 权重相等",必须在拼接之前保留 clip 归属。
+
+**建议的实现路径**(三层,R²/MSE/MAE/skill 全部复用同一套底层聚合,不是四套各自实现):
+1. `predict_series` 增加返回一个 `clip_ids: (N,)` 数组,与 `ytrue`/`yhat` 的 origin 轴对齐,
+   记录每个 window 来自哪条 clip(不改变现有调用方式,新增一个返回值/或新函数,不破坏已有单测)。
+2. 新增 `per_clip_sse(ytrue, yhat, mask, clip_ids, train_mean) -> dict[clip_id, {"model":..,
+   "mean":.., "persistence":..}]`——每条 clip 先各自算出对模型/对 TRAIN-mean 基线/对 persistence
+   的 SSE(逐 channel),这是整个聚合体系的"充分统计量"。
+3. **class-level 数字 = 这些 per-clip SSE 的等权平均**,不是重新跑一遍模型:
+   `R²_class = 1 - mean_clip(SSE_model_clip) / mean_clip(SSE_mean_clip)`
+   (逐 clip 先各自算好、再对 clip 取平均,不是先把所有 clip 的 SSE 加总再除——这里特意用
+   "平均的比值"而不是"比值的平均":单条 clip 的 R²_clip 分母可能接近 0(如果那条 clip 的
+   target 本来就很贴近 TRAIN 均值),对比值取平均会被这类退化 clip 的爆炸值主导;先在 SSE 层
+   面等权平均、再取一次比值,数值稳定得多)。这一步产出的 per-clip SSE 数组,后面 bootstrap
+   直接复用,不需要重新跑模型——这是这套设计的关键收益(见实操细节 4)。
+
+**问你(Q2)**:这个"per-clip SSE 优先、class 数字是 SSE 均值之比、不是逐 clip R² 的均值"的设计,
+是否同意?这是一个真实的统计选择,答案里没有指定,需要你确认。
+
+### 实操细节 3 —— trait class(smooth/abrupt)标签目前不是正式代码产物
+
+到目前为止我在 G2 里说的"108 条 smooth / 2,850 条 abrupt",判定标准是我 2026-08-07 在临时脚本里
+手打的一个动作集合(从未写成正式模块,也从未请你确认过是"最终版"):
+```python
+SMOOTH = {"pouring","stirring","scooping","serving","eating","wiping","flipping","cutting",
+          "drinking","spreading","cleaning","scraping","drawing","writing","carrying","lowering"}
+```
+G2 现在要正式跑,这个集合必须变成一个有版本、可追溯的代码文件,而不是继续散落在临时脚本里。
+**建议**:新建 `src/opentouch/trait.py`,固化上面这个集合 + `trait_class(action) -> "smooth"/"abrupt"`。
+
+**还有一个必须提醒的点**:108/2,850 这两个数字,是在**join bug 修复之前**、用旧的前缀匹配方法
+数出来的(2026-08-07 那次)。后来 2026-08-10 把 label join 换成了时间戳重叠匹配,理论上会救回一部分
+之前被 miss 掉的 clip、也可能纠正一些之前被错误配对的 action 标签——**这两个数字下载完成后必须
+用最终 manifest 重新数一遍,不能直接沿用**。
+
+**问你(Q3)**:上面这个 `SMOOTH` 集合是否确认(还是要增删)?确认后我会建这个文件,并在下载完成
+后用真实 manifest 重新核实 108/2,850 这两个数字。
+
+### 实操细节 4 —— bootstrap 的精确操作,和"paired"到底配对什么
+
+你说"model comparison 用 paired clip bootstrap"。这里有两种不同的"配对",需要分开定义,因为
+G1(比较模型)和 G2(比较 trait class)配对的对象不一样:
+
+- **G1(模型对比,如 AR vs GRU-aggregate)**:两个模型是在**同一批 TEST clip** 上打分的,天然可配对
+  ——每次 bootstrap 迭代:对 clip 有放回重采样一组,**同一组 clip 同时喂给两个模型**各自算出
+  R²(或 skill),取差值;重复 B 次,得到"差值"的分布 → 95% CI(取 2.5/97.5 分位数)。这是标准
+  paired bootstrap,"配对"指"同一次重采样、两个模型都在这组 clip 上评分"。
+- **G2(class 对比,ΔR²=R²_smooth-R²_abrupt)**:smooth 和 abrupt 是**互斥的两组 clip**,不存在
+  "同一条 clip 既是 smooth 又是 abrupt"这种天然配对。这里只能是**两个独立样本的 bootstrap**:
+  smooth 组内部有放回重采样、abrupt 组内部独立有放回重采样,各自算 R²,取差值;重复 B 次。仍然是
+  **clip-level**(不是 window-level),但不是"paired"意义上的配对,是两个独立总体各自重采样。
+
+**问你(Q4)**:我的理解是——G1 用真正的 paired bootstrap(同一重采样同时评两个模型);G2 的 ΔR²
+用 clip-level 但两组独立重采样(没有"paired"这个概念,因为两组 clip 不重叠)。这个区分对吗?
+如果你说的"paired"另有所指(比如按某种方式把 smooth clip 和 abrupt clip 强行配对),请指出具体
+怎么配对。
+
+**问你(Q5,次要)**:bootstrap 重采样次数,建议 **B=2000**(常见默认值,95% CI 用 2.5/97.5 分位数),
+可调。有偏好的话告诉我。
+
+**这一步依赖实操细节 2**:有了"每条 clip 的 SSE(对模型/对均值/对 persistence)"这个中间产物,
+bootstrap 只是对这个小数组重采样再算比值,不需要重新跑模型或重新滚动 origin——这也是为什么
+per-clip SSE 要作为一个显式的、独立的中间产物而不是内嵌在某个大函数里。
+
+### 实操细节 5 —— GRU-aggregate 放在哪里写,和"暂缓 map 分支"的决定有一个没说清的边界
+
+回去确认"点预测 GRU-aggregate"这个模型到底该怎么建的时候,发现一件事需要摊开说:
+
+`PROJECT_CONCLUSIONS §6.4` 四路对比表里的 "GRU-aggregate",代码上很可能**不是独立脚本**,而是
+`src/actionsense/tactile_map/` 模块里的 `AggWindows` 数据集分支(`tactile_map/data.py`)——即
+map 模块内部本来就有一条"跳过原始 16×16 图、直接吃聚合信号 (T,6)"的路径,专门用来在四路对比里
+当 GRU-aggregate 用。也就是说 **CNN-map/flatten-map(吃原始 tactile map 的两个模型)和
+GRU-aggregate(吃聚合信号的模型)是同一个 Python 包里的兄弟分支,不是三个独立的东西**。
+
+这和"此前决定暂缓 map 分支"的范围产生了一个交叉:当时"暂缓"的理由是"不需要原始 16×16 map",
+但 GRU-aggregate 根本不吃原始 map,只吃已经在缓存里的 `state_N.npy`——按暂缓的原意它不该被一起
+搁置。但代码物理上和被暂缓的东西长在同一个文件里,要不要现在就把 GRU-aggregate 这一小块从
+`tactile_map/` 里单独 fork 出来(只 fork 聚合信号路径,不碰 CNN/flatten 那两条),还是把整个
+`tactile_map/` 一起视为"暂缓",G1 先只跑 persistence/seasonal/AR,GRU-aggregate 也一起推迟?
+
+**问你(Q6)**:(a) 现在就单独 fork GRU-aggregate 这一条路径(不动 CNN-map/flatten-map);还是
+(b) G1 先只做 persistence/seasonal/AR 三个,GRU-aggregate 和整个 map 分支一起延后?我倾向 (a)
+——G1 的核心问题正是"GRU 是否复现比 persistence 强、AR 是否复现最强",少了 GRU 这个问题答不全
+——但这是范围决定,想让你拍板而不是我自己认定。
+
+### 实操细节 6 —— 一个关于"G2 到底要不要等 splits.py"的逻辑澄清
+
+这一点此前的表述不够精确,借这次机会说清楚,**这不是问题,是我要更正的一处逻辑**:
+
+G2 有两层,依赖不一样:
+- **training-free 半层**(persistence 的 R²/MSE,零拟合)——理论上语料下载完就能跑,不需要
+  `splits.py`。但"SSE_mean"的 mean 如果没有 TRAIN/TEST 区分,只能用**全量语料**的均值,这样算出
+  的数字只能当**探索性的早期信号**,不是可以正式报告的最终结果(因为用全量均值本质上是又把
+  "测试"数据的统计量泄漏回了基线)。
+- **AR 半层**(按 trait class 分别拟合 AR,算 R²)——AR 需要在 TRAIN 上拟合、在 TEST 上打分才算
+  诚实,这一层和 G1 一样**必须等 `splits.py`**。
+
+也就是说:**下载一完成,G2 的探索性版本立刻能跑(全量均值、无 AR、只看 persistence 的 R² 趋势),
+但 G2 的正式、可报告版本和 G1 一样卡在 p1/p2**。此前的表述容易让人以为"G2 完全不需要 split",
+这里更正为"G2 的training-free部分不需要 split 才能跑探索版,但正式版仍然需要"。
+
+### 实操细节 7 —— 建议的分阶段执行顺序(整体逻辑)
+
+把上面几点串成一个有依赖关系的执行顺序:
+
+**阶段 1(现在就能写,零数据依赖,和之前一样用合成数据单测)**:
+- `src/opentouch/trait.py`(SMOOTH 集合 + `trait_class()`,待 Q3 确认)
+- `predict_series` 的 `clip_ids` 追踪 + `per_clip_sse()`(待 Q2 确认)
+- 新的 R² metric 函数(逐 channel + TRAIN-mean baseline,待 Q1 确认)
+- clip-level bootstrap 工具函数(paired 版本给 G1,双独立样本版本给 G2,待 Q4/Q5 确认)
+- GRU-aggregate 的 fork(待 Q6 确认要不要现在做)
+
+**阶段 2(下载完成、`splits.py` 仍未解决时就能做)**:
+- 用真实 manifest 重新核实 108/2,850(或 trait.py 确认后的新集合对应的数字)
+- G2 探索性版本(persistence-only R²,全量均值,明确标注"非正式结果")
+
+**阶段 3(`splits.py` 解决之后)**:
+- G1 正式跑(persistence/seasonal/AR + 视 Q6 决定是否含 GRU-aggregate),paired bootstrap 出 CI
+- G2 正式版(按 class 分别拟合 AR,R² 为主指标,双独立样本 bootstrap 出 ΔR² 的 CI)
+
+### 本次待确认问题清单(Q1–Q6,均不涉及已拍板的 OQ-A~H,是操作化过程中新浮现的实现细节)
+Q1:TRAIN-mean baseline + 逐 channel 报告 R²/ΔR²(+均值作 headline)——确认?
+Q2:per-clip SSE 优先、class 数字是"SSE 均值之比"而非"逐 clip R² 的均值"——确认?
+Q3:`SMOOTH` 动作集合是否确认(还是要增删)?确认后 108/2,850 会用新 manifest 重新核实。
+Q4:G1 用真正 paired bootstrap(同一重采样评两模型);G2 的 ΔR² 用两组独立重采样——这个区分对吗?
+Q5:bootstrap 次数 B=2000,是否有偏好?
+Q6:GRU-aggregate 现在单独 fork,还是和整个 map 分支一起继续暂缓?
+
+**状态:以上均为计划,未写任何代码。等待你 review 后再动手(阶段 1 的部分不依赖下载,可以先做)。**
+
+---
+
+### 2026-08-12 — 重试下载,24 小时冷却不够,仍然 0/26
+
+`scripts/crc/stream_opentouch.sh` 在 crcfe02 上单实例干净跑完(锁机制验证有效——`pgrep -fa`
+一度显示 2 个进程,查证后确认是 `pgrep -f` 自我匹配的误报,`ps -eo pid,ppid,lstart,cmd` 核实
+实际只有 1 个真实进程,脚本本身跑完后进程自然退出,锁目录也被 EXIT trap 正常清理)。
+
+结果:**26/26 shard 依然全部失败**,报错文字和 2026-08-10 那次逐字相同("Too many users have
+viewed or downloaded this file recently... may take up to 24 hours")。`cache` 仍是空目录
+(4.0K,0 clips)。确认这是同一个 Google Drive 共享文件配额池,24 小时冷却这次不够。
+
+三个对策摆在用户面前,尚未选择:
+1. 挂自动重试循环(每 3 小时一次,`failed_ids.txt` 空了自动停),继续等配额恢复;
+2. 转存到用户自己的 Google Drive(浏览器手动复制 26 个文件,换新 file ID),绕开共享文件配额;
+3. 邮件联系作者 `rayxsong@mit.edu` 问有没有非 Drive 的镜像(如 HuggingFace)。
+
+**状态:等待用户选择下载对策。同时 Q1-Q6(2026-08-11 记录)仍等待用户回复,期间不再改动任何
+代码/配置。**
+
+---
+
+## OPENTOUCH 下载操作日志(独立追踪,与上面 harness/训练计划的讨论无关)
+
+本节只记录"怎么把 26 个 shard + labels 弄到手"这件事的过程和现状。Q1-Q6(eval harness 设计问题)
+和 GRU-aggregate fork 的代码工作**在此期间全部暂停**,等用户回复后再继续——这是操作性等待,不是
+放弃或改变了之前的计划。
+
+### 时间线
+- **2026-08-10**:首次尝试全量下载(26 shard),**26/26 失败**,Google Drive 报错
+  "Too many users have viewed or downloaded this file recently... may take up to 24 hours"。
+- **2026-08-12(24 小时后重试)**:同样命令重跑,**依旧 26/26 失败**,报错文字逐字相同,确认
+  24 小时冷却这次不够(该提示本就是"up to 24 hours"的估计上限,不是保证)。中途出现过
+  `pgrep -fa stream_opentouch.sh` 显示 2 个进程的疑似双开警报,用 `ps -eo pid,ppid,lstart,cmd`
+  核实后确认只有 1 个真实进程(`pgrep -f` 对自身命令行的误匹配),脚本本身单实例运行正常,
+  锁机制未被触发,不是并发问题。
+- **官方渠道复核**:重新完整读了 `OpenTouch-MIT/opentouch` 的 README 全文 + 3 个 issue——
+  确认**没有任何替代下载渠道**(无 HuggingFace/Zenodo/S3/torrent),只有 Google Drive 一条路;
+  仓库自己的 issue 里也从未有人报过这个配额问题。作者联系方式:`rayxsong@mit.edu`(论文一作
+  Yuxin Ray Song),邮件求镜像这条路仍然开放、未执行。
+
+### 探索过的绕过方案
+1. **浏览器手动测试**:用户登录 Google 账号后手动点开一个 shard 链接,**成功下载(~560MB,
+   和已知单 shard 大小 561MB 吻合)**——证实匿名 `gdown` 请求和已登录浏览器访问很可能是分开
+   计算配额的。
+2. **cookies 认证方案(部分执行,中途触发安全事件)**:
+   - 设计:用一个"不常用"的小号,在隔离环境(无痕窗口/独立 Chrome 资料/换浏览器)登录,导出
+     该账号在 `drive.google.com`/`google.com` 的会话 cookies,放到 `~/.cache/gdown/cookies.txt`
+     (`gdown` 默认会自动读取此路径,无需改代码/改脚本),让 `stream_opentouch.sh` 用已登录身份
+     重跑。
+   - **安全事件**:用户把导出的 `cookies.txt` **完整内容直接贴进了对话**,其中包含
+     `SID`/`SSID`/`__Secure-1PSID`/`__Secure-3PSID` 等实时会话凭证——已提醒这些值等同于该账号
+     的登录状态,已泄露进对话记录。**用户已立即修改该账号密码**,使当时贴出的那份 cookies
+     失效。这份已经失效的旧内容不再使用;如果之后要用 cookies 方案,必须在改密后重新走一遍
+     隔离窗口登录 + 重新导出的完整流程,且**新文件绝不能再贴进对话**,只能通过 `scp` 等命令行
+     方式直接传输。
+   - 无痕模式下插件默认不可用(Chrome 默认禁止扩展在无痕窗口运行,需要在
+     `chrome://extensions/` 手动开启"在无痕模式下允许",或改用独立 Chrome 资料/换浏览器规避)。
+   - **未完成/未验证**:是否要恢复走这条路,用户尚未决定;即使走通,自动化连续请求 26 次
+     是否会被 Google 的异常行为检测单独限流,也未经验证,不是"保证成功"的方案。
+   - **风险分级讨论**:贴进聊天(暴露面广、不可控)明显重于 `scp` 到 CRC(点对点加密传输到
+     用户自己有账号的机器,残余风险是 CRC 管理员权限/home 目录权限配置)。进一步提出更干净的
+     替代:cookies 全程不离开本地 Mac——直接在本地跑同一个 `stream_opentouch.sh`(脚本本身是
+     "下一个删一个"的流式设计,peak 磁盘占用约 560MB,本地 4.4GB 可用空间完全够用,`gdown`/
+     `h5py` 本地已装好),完全避免把凭证放到共享文件系统上。
+3. **"制作副本"到用户自己的 Drive(讨论中,建议但未测试)**——理论上最优的方案:
+   - 机制:Google Drive 的"制作副本"(Make a copy,**不是**"添加快捷方式")是服务器内部直接
+     复制,不经过请求方的网络下载,大概率不占用"过多用户下载"这个配额,且几乎瞬间完成。
+   - 复制后的文件是用户自己账号名下的**全新文件 ID**,配额与原文件无关,之后用 `gdown` 下载
+     新 ID 应该不会再撞到限流。
+   - 两个未验证点:(a) OpenTouch 的分享设置是否开放了"复制"权限(下载能用不代表复制一定能用,
+     虽然 Drive 通常把下载/打印/复制这三个权限绑在一起);(b) 用户自己 Drive 的可用空间是否够
+     14.6GB(免费版 15GB,可能需要分批复制→下载→删除→下一批)。
+   - **建议的验证步骤**(已给用户,尚未执行):先对 1 个文件测试"制作副本"选项是否存在、
+     复制后能否用新 ID 正常 `gdown`,确认可行再批量处理剩下 25 个 + labels。
+4. **rclone(OAuth 走官方 Drive API)**——提及但未深入,作为比 cookies 更"正规"的备选,配额池
+   通常与 `gdown` 的匿名导出链接分开。用户想试的话可以再展开具体步骤。
+
+### 当前执行中的方案
+用户已启动**自动重试循环**(anonymous gdown,不涉及 cookies/账号,零安全风险):
+```bash
+cd ~/TouchAnything
+nohup bash -c 'for i in $(seq 1 24); do
+    bash scripts/crc/stream_opentouch.sh >> ~/opentouch_retry_loop.log 2>&1
+    [ -s ~/opentouch/failed_ids.txt ] || { echo "ALL DONE" >> ~/opentouch_retry_loop.log; break; }
+    sleep 10800
+done' > /dev/null 2>&1 &
+```
+每 3 小时重试一次,`failed_ids.txt` 空了(全部成功)自动停止,最多循环 24 轮(合计 72 小时)。
+已运行约 3 小时,尚未确认本轮结果。
+
+**检查命令**(状态未知时随时可跑,不影响后台任务):
+```bash
+ps aux | grep -E "opentouch_retry_loop|10800" | grep -v grep   # 循环进程是否还活着
+tail -20 ~/opentouch_retry_loop.log                             # 最近发生了什么
+sort -u ~/opentouch/done_ids.txt | wc -l                        # 累计成功 shard 数(目标 26)
+ls ~/opentouch/cache/state_*.npy 2>/dev/null | wc -l             # 已提取 clip 数
+wc -l < ~/opentouch/failed_ids.txt                               # 本轮仍失败数(目标 0)
+grep "ALL DONE" ~/opentouch_retry_loop.log || echo "尚未完成"
+```
+
+### 状态:自动重试循环运行中,结果未知。cookies 方案暂停(等重新导出),"制作副本"方案未测试。
+### Q1-Q6(eval harness)与 GRU-aggregate fork 的代码工作全部暂停,等用户先处理完下载。
+
+### 2026-08-12续 — 为什么 07-02 成功、现在反复失败:脚本比对 + 根因分析
+
+用户提问促成的排查。直接 `git show` 对比 07-02 成功时用的初代 `download_opentouch.sh`
+(commit `4d38218`)与现在的 `stream_opentouch.sh`:**下载机制逐字相同**——同一份 26 个
+file ID、同样是无延迟无退避的 `gdown "$ID"` 循环、失败仅警告不中断。初代脚本注释里
+就写着 `(Drive quota?)`,说明这个风险从一开始就存在,只是当时没有真正触发。**排除"这次
+脚本改坏了什么"这个假设。**
+
+**根因是外部条件 + 自身重复请求的叠加,不是代码问题:**
+1. 论文自 2025-12 挂出后到现在一个多月,该共享文件的**历史累计访问量**很可能持续上升,
+   Google Drive 对"任何人持链接"文件的配额大概率是滚动/累积判定,不是逐日重置。
+2. **我们自己短期内对同一批 26 个 ID 发起了多轮完整请求**:07-02(成功)、08-10(失败,
+   且因双开 bug 部分 shard 被实际重复请求 2-3 次)、08-12(失败)、以及本轮自动循环的
+   第 1 轮(失败)——几天内反复扫同一批文件,可能在持续刷新 Drive"最近被下载过多"的
+   判定窗口,阻止其自然冷却。
+
+**行动建议(已给用户,待确认)**:自动重试循环(每 3 小时打一遍同样 26 个 ID)可能是在
+南辕北辙——建议停掉或大幅拉长间隔,转向完全不同的配额池:**"制作副本"到用户自己的
+Drive**(用户存储配额,与这个被打爆的共享文件配额无关,不受这几天历史请求影响),这是
+当前最值得优先验证的路径。
+
+### 2026-08-12续2 — 新建 download_own_copies.sh("制作副本"路径的下载脚本),本地充分测试
+
+用户确认走"制作副本到自己 Drive"这条路,问"下完之后怎么在 CRC 上用"。设计:不改
+`stream_opentouch.sh` 本体(它的 26-ID 硬编码数组假设的是原始共享文件;副本产生的是全新、
+无法预知的 ID,数量相同但值不同),新建 `scripts/crc/download_own_copies.sh`——同样的
+加锁 + 单 shard 落盘 + 下载后即删的安全设计,改成从**外部 ID 列表文件**读,而不是硬编码
+数组。顺序无关紧要,因为抽取认的是 HDF5 内部的 scene 名字,不是 Drive 文件 ID 或文件名。
+
+**本地测试**(用假的 `gdown`/`extract_opentouch.py` 替身,不发真实网络请求,专测控制流):
+1. ID 解析:支持完整分享链接(`.../file/d/<ID>/view...`)、`uc?id=<ID>` 形式、纯 ID、带前后
+   空白的纯 ID。**测试中发现一个真实 bug**:纯 ID 分支原本用 `tr -d '[:space:]'` 去空白,
+   这个命令连 `echo` 自带的换行符也一并删掉,导致连续两个纯 ID 会被错误拼接成一行——已改用
+   `read -r <<< "$line"` 的写法修复,重新测试确认。
+2. **发现第二个环境问题**:脚本最初用 `mapfile` 读文件到数组,本地(macOS)的 `/bin/bash`
+   是苹果因授权协议原因冻结在 3.2(2007 年版本)的老版本,`mapfile` 是 bash 4.0(2009)才有
+   的内建命令,本地直接报错。CRC 是 Linux,大概率是新版 bash,但**没有 SSH 权限无法直接验证
+   CRC 的 bash 版本**——与其假设,不如换成 `while IFS= read -r; do ...; done` 这种 bash 3.2
+   起就支持的写法,两边都保证兼容,不留隐患。
+3. 端到端跑通:3 个测试 ID(2 个成功、1 个故意模拟"配额失败"),确认成功的被正确抽取、失败的
+   被记入 `failed_own_ids.txt` 且不中断后续。
+4. **断点续传**:同一份 ID 列表重跑一次,之前成功的 2 个被跳过("already done"),之前失败的
+   1 个（这次让它模拟成功)被重试并成功,最终 3/3、无重复抽取(marker 文件里每个 shard 只
+   出现一次)。
+5. **并发锁**:模拟一个"下载中"的慢速 gdown,同时启动第二个实例——第二个立即被拒绝
+   (`FATAL: another run holds .../.stream.lock`,退出码 1),第一个正常跑完 3/3。直接复现并
+   验证了修复 2026-08-10 那次 cache 损坏事故的同一个安全机制,不是假设它"抄对了"就算数。
+
+**用法**:
+```bash
+bash scripts/crc/download_own_copies.sh IDS_FILE [WORKDIR]
+# IDS_FILE: 一行一个 Drive 文件 ID 或完整分享链接,支持 '#' 注释和空行
+```
+Labels 不需要走"制作副本"——labels 文件很小(459KB),此前从未撞到配额问题,继续用原始
+labels ID 通过 `stream_opentouch.sh`(或手动 `gdown` 该 ID)获取一次即可,`final_annotations`
+目录存在时脚本会跳过重新下载。
+
+**状态**:代码已写完、本地全部测试通过、已 commit。用户仍需完成:(a) 在自己 Drive 里对
+26 个 shard 做"制作副本",(b) 收集新文件 ID 存成文件传到 CRC,(c) 在 CRC 上跑这个脚本。

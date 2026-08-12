@@ -5,7 +5,15 @@ import sys
 
 import numpy as np
 import pytest
-import torch
+
+# Guarded so a broken torch install SKIPS this file instead of aborting collection for the whole
+# tests/ directory (a half-installed torch raises OSError from dlopen, which pytest.importorskip
+# does not catch -- it only catches ImportError). Added 2026-08-12; no behavioral change when
+# torch works. Same guard as tests/test_opentouch_gru_aggregate.py.
+try:
+    import torch
+except Exception as exc:                                    # noqa: BLE001
+    pytest.skip(f"torch not usable in this environment: {exc}", allow_module_level=True)
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 

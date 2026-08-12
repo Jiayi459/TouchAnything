@@ -3594,3 +3594,9 @@ tests/test_opentouch_gru_aggregate.py` → **43 passed, 1 skipped**(skip = torch
 阶段 2(下载落地后):用最终 manifest 重数两类 clip 数、跑 G2 探索版。阶段 3(splits.py 解决后):
 G1/G2 正式版。**OQ-J~N 不阻塞 commit,但阻塞"报哪张表"**;OQ-L/OQ-M 若被否决,只需改
 `trait.py` 的表并重跑单测(改动局部,但必须在**看到任何 G2 数字之前**改,否则就成了 post-hoc)。
+
+**补记(同日)**:`pytest tests/`(整个目录)在本机原本就是**中断**的——`tests/test_tactile_map.py`
+在模块层 `import torch`,撞上同一个半装 torch 的 OSError,导致整个 collection 失败。这是**既有
+状况、与本次改动无关**,但它会让未来的会话把这个中断误读成"新代码坏了",所以给它加了与
+`test_opentouch_gru_aggregate.py` 相同的 `try/except` + `allow_module_level=True` 守卫(torch 正常
+时行为不变)。现在 `pytest tests/` → **43 passed, 2 skipped**(两个 torch 文件)。

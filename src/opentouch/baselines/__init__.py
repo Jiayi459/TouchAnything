@@ -8,7 +8,7 @@ had hardcoded 6); see their own docstrings.
 """
 from src.actionsense.eval_harness.baselines.persistence import Persistence  # noqa: F401  (unchanged, reused)
 
-from .base import Baseline, predict_series, origins  # noqa: F401
+from .base import Baseline, predict_series, predict_series_by_clip, origins  # noqa: F401
 from .seasonal import SeasonalNaive                 # noqa: F401
 from .ar import AR                                  # noqa: F401
 

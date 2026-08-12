@@ -56,17 +56,36 @@ def origins(T: int, cfg: Config) -> np.ndarray:
     return np.arange(lo, hi, stride)
 
 
-def predict_series(bl: Baseline, data: dict[int, np.ndarray], groups: dict[int, str],
-                   cfg: Config) -> tuple[np.ndarray, np.ndarray]:
-    """Rolling-origin evaluation. Returns (ytrue, yhat), each (N_total, H, C)."""
+def predict_series_by_clip(bl: Baseline, data: dict[int, np.ndarray], groups: dict[int, str],
+                           cfg: Config) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Rolling-origin evaluation, WITH clip provenance. -> (ytrue, yhat, clip_ids).
+
+    `ytrue`/`yhat` are (N_total, H, C); `clip_ids` is (N_total,) recording which clip each
+    forecast origin came from, aligned to the origin axis.
+
+    WHY THIS EXISTS: `predict_series` concatenates every clip's windows into one array, at
+    which point clip identity is gone and `metrics.py` cannot tell which rows belong together.
+    Per-clip equal weighting (OQ-C, 2026-08-11) and clip-level bootstrap (OQ-D) both need that
+    identity, so it is preserved here instead of being reconstructed downstream. The original
+    `predict_series` is kept as a thin wrapper so every existing caller and unit test is
+    untouched.
+    """
     H = cfg.horizon
     C = len(cfg.channels)
-    yts, yhs = [], []
+    yts, yhs, ids = [], [], []
     for i, Y in sorted(data.items()):
         g = groups[i]
         for t in origins(len(Y), cfg):
             yts.append(Y[t + 1:t + 1 + H])                    # target-time indexed
             yhs.append(bl.predict(Y[:t + 1], H, g))           # causal: only past passed in
+            ids.append(i)
     if not yts:
-        return np.zeros((0, H, C)), np.zeros((0, H, C))
-    return np.stack(yts), np.stack(yhs)
+        return np.zeros((0, H, C)), np.zeros((0, H, C)), np.zeros((0,), dtype=np.int64)
+    return np.stack(yts), np.stack(yhs), np.asarray(ids, dtype=np.int64)
+
+
+def predict_series(bl: Baseline, data: dict[int, np.ndarray], groups: dict[int, str],
+                   cfg: Config) -> tuple[np.ndarray, np.ndarray]:
+    """Rolling-origin evaluation. Returns (ytrue, yhat), each (N_total, H, C)."""
+    ytrue, yhat, _ = predict_series_by_clip(bl, data, groups, cfg)
+    return ytrue, yhat

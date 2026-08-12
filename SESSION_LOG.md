@@ -3146,3 +3146,451 @@ labels ID 通过 `stream_opentouch.sh`(或手动 `gdown` 该 ID)获取一次即�
 
 **状态**:代码已写完、本地全部测试通过、已 commit。用户仍需完成:(a) 在自己 Drive 里对
 26 个 shard 做"制作副本",(b) 收集新文件 ID 存成文件传到 CRC,(c) 在 CRC 上跑这个脚本。
+
+### 2026-08-12续3 — 重新评估下载路径:用 claude.ai Google Drive 连接器直接自动化"制作副本"(执行中)
+
+用户要求重新评估下载流程(转存自己 Drive vs 官方 gdown vs 其他)。本机核查:之前记录的
+"3 小时自动重试循环"在本地 Mac 上**不存在**(无进程、无 ~/opentouch_retry_loop.log、无
+done_ids.txt)——该循环应是跑在 CRC 上的,从本机无法核实其状态。
+
+**新事实:本会话有 claude.ai Google Drive 连接器(登录身份 jh9141@nyu.edu),"制作副本"
+不需要用户在浏览器手动点 26 次,Claude 可以直接调 Drive API 的 files.copy 完成。**
+
+已执行(全部服务器端复制,不占本地网络/磁盘):
+1. 建目标文件夹 `opentouch_own_copies`(ID `11w1KgqxWFI7hbmfO35QhxooH7EQlsb1s`)。
+2. 测试性复制 shard-01 原始 ID → **成功**(587MB 秒级完成,新文件 owner=jh9141@nyu.edu),
+   证实:(a) 分享设置开放了复制权限;(b) 复制操作可绕过 shard-01 当时的下载配额标记。
+3. 批量复制其余 shard:**shard-05(192MB, home_kitchen_p3.hdf5)成功**,其余全部报
+   "The caller does not have permission"。
+4. **对照实验**:把几分钟前刚复制成功过的 shard-01 原始 ID 再复制一次 → 现在也失败。
+   **结论:失败不是"每个文件被永久锁",而是连续快速 files.copy 触发了针对本账号的临时
+   限流。** 顺带发现:shard 文件大小差异很大(192MB / 587MB / 1.72GB 不等,原名如
+   office_ml_p1.hdf5、home_kitchen_p3.hdf5),之前"每个 shard 约 561MB"的假设不准,
+   14.6GB 是总量、不是 26×561MB。
+5. 副本默认权限 = 仅 owner。**匿名 gdown 下不了私有副本**——计划:26 个副本集中在同一
+   文件夹,之后用户对文件夹做一次"知道链接的任何人可查看"共享,文件继承权限,
+   `download_own_copies.sh` 即可用新 ID 匿名下载。(NYU Workspace 若禁止对外链接共享,
+   备选 rclone OAuth,见前文方案 4。)
+
+**进度:2/26 已复制。**明细与待办 ID 列表在 scratchpad `copy_state.md`(会话临时文件),
+最终成功后会把 26 个新 ID 写成 repo 内的 IDS_FILE 供 `download_own_copies.sh` 使用。
+另有一份多余的 shard-01 副本在用户 Drive 根目录(ID `1adjDn3pyRs0IRqWg7DS1cNf9A40A_iP-`,
+第一次测试产物),全部完成后可移入回收站。
+
+**当前策略:改为单个、低频(≥10 分钟间隔)复制,失败则 10m→30m→60m 退避,由后台定时器
+自动唤醒继续,直到 26/26。**同时建议:CRC 上那个每 3 小时打原始 26 ID 的重试循环应停掉
+(见"续"节根因分析,它可能在阻止原始文件配额冷却,且"制作副本"路线已不再需要它)。
+
+### 2026-08-12续4 — 限流层级判定:账号级复制限流,读操作不受影响
+
+退避重试记录:+10min 失败、+40min 失败。区分实验:复制**自己拥有的文件**(shard_05 副本,
+无共享配额标记)也报同样的 "The caller does not have permission" → **限流作用于本账号的
+files.copy 操作本身**,与源文件是谁的无关;get_file_metadata 读操作正常 → 连接器没坏,
+只是写/复制被限。该类服务器端复制限流(rclone 社区亦有记载)通常数小时内解除,最坏 24h。
+策略:每 60 分钟用真实目标 shard_02 探测一次(成功即继续推进,不造垃圾文件)。
+进度:2/26。
+
+### 2026-08-12续5 — 用户问"要不要换方法,比如手动下载":评估与建议
+
+核实:本地 Mac 磁盘余 4.6GB(总需 14.6GB);rclone 未安装,gdown 已装;限流仍未解除
+(每小时探测继续)。给出的建议排序:
+1. **浏览器手动"制作副本"(推荐先试)**——与被限流的 API 不同通道;先对 shard_02 测试
+   预览页 ⋮ 菜单是否有该选项,可用则手动复制其余 24 个并挪入 opentouch_own_copies,
+   文件名无关紧要(抽取认 HDF5 scene 名),完成后 Claude 经连接器扫文件夹核对+生成新
+   ID 列表。
+2. **rclone backend copyid(备选,兼做区分实验)**——用户自己的 OAuth client 走同一
+   files.copy API;能成 → 限流在 client 层,不能成 → 在账号层。已给完整命令。
+3. **手动直接下载(最后手段)**——虽经验证可行,但 4.6GB 本地空间 vs 14.6GB 数据须
+   分批下载→scp→删除循环,14.6GB 过两遍家用网络,且登录态浏览器下载配额连下 26 个
+   有中途被掐风险。
+剩余 24 个原始 ID 已写入 `data/opentouch_remaining_ids.txt`(repo 内,含说明注释)。
+Claude 的每小时自动探测与用户手动进度在同一文件夹汇合,不会重复。
+
+### 2026-08-12续6 — "今天必须拿到":镜像搜索无果,确定今日路径,用户网络受限的应对
+
+用户报告当前网络完全打不开 shard 链接,要求今天拿到数据。行动与结论:
+1. **镜像搜索(两轮 WebSearch)**:确认 OpenTouch 无任何第三方镜像(无 HuggingFace/
+   Zenodo/torrent),Google Drive 是唯一渠道——"绕开 Google"的幻想正式排除。
+2. **download_file_content 工具排除**:其返回形态是内联 base64,不是临时授权链接,
+   192MB-1.7GB 的 shard 无法经此通道传输。
+3. **用户确认(AskUserQuestion)**:(a) 手机蜂窝流量可以访问 Google Drive;(b) 可正常
+   SSH 登录 CRC。→ 今日路径成立:限流解除后 Claude 自动复制完 24 个 → 用户手机上把
+   `opentouch_own_copies` 文件夹设为"知道链接的任何人:查看者"(子文件自动继承)→
+   CRC 上跑 `download_own_copies.sh`。
+4. **已请用户立即在手机上执行文件夹共享**(不必等复制完,先共享后复制的文件同样继承)。
+   已启动后台轮询(每 2 分钟 curl 探测 shard_05 副本是否已公开,上限 2h),检测到公开
+   后将立即用本地 gdown 实测一个副本,端到端验证链路。
+5. `data/own_copy_ids_partial.txt`(现有 2 个副本的新 ID)已写入 repo,可供 CRC 提前
+   冒烟测试;最终 26/26 后会生成完整 IDS_FILE。
+6. 复制限流仍未解除(距触发约 2h40m,又一次探测失败),每小时探测继续。**若今晚仍未
+   解除,兜底方案**:用户在手机浏览器(桌面模式)登录 drive.google.com 手动对剩余 24 个
+   原始链接逐个"制作副本"——繁琐但不依赖 API 限流解除。
+
+### 2026-08-12续7 — 链路端到端验证成功;NYU 账号存储不足,切换到用户另一账号的方案
+
+1. **用户已在手机上完成文件夹公开共享**(探测第 4 次命中,共约 8 分钟)。本地立即实测:
+   匿名 gdown 下载 shard_05 副本成功,192,755,577 字节与 Drive 完全一致,h5py 打开正常
+   (top-level: calibration/data/transform_slam_to_rgb)。**"制作副本→文件夹公开→匿名
+   gdown"整条链路今日已验证打通。**测试文件已删(本地仅 4.6GB 空闲)。
+   另:本机 curl/gdown 均能正常触达 Google——用户浏览器"完全打不开 shard 链接"的问题
+   不是本机网络层面的封锁,具体原因未查明(可能是浏览器/账号态问题)。
+2. **用户告知:NYU 账号 Drive 存储不够,有另一个存储充足的 Google 账号可用。**这使
+   切换账号成为必选项——剩余 24 个 shard 约 13-14GB,NYU 账号装不下,与限流何时解除
+   无关。
+3. **新方案**:用户在 claude.ai 设置中把 Google Drive 连接器重新授权为大容量账号
+   (设置→连接器→Google Drive→断开→重连,用手机蜂窝流量登录新账号)。之后 Claude 在
+   新账号下重建流程:建文件夹→复制剩余 24 个(新账号大概率不带限流状态)→用户手机上
+   共享一次新文件夹→生成完整 IDS_FILE→CRC 下载。注意:连接器切换后本会话能否直接
+   拿到新凭证未知,若工具报错则需新开会话(本日志已含全部状态,可冷启动续做)。
+4. **用户今天可立即做的**:scp `data/own_copy_ids_partial.txt` 到 CRC,跑
+   `download_own_copies.sh` 先把已公开的 shard_01/05 拿下;完成后把 NYU 账号里的
+   2 个副本+根目录多余的 shard_01 副本移入回收站,释放约 1.4GB。
+
+### 2026-08-12续8 — 用户嫌换账号麻烦,问不换账号需清理多少空间:给出批次方案
+
+剩余 24 shard ≈ 13.8GB(14.6 总量 − 已复制 0.78GB)。方案表:一次性≈14GB;2 批≈7GB;
+3 批≈5GB;极限逐个≈2GB(已知最大单文件 shard_02 1.72GB)。推荐 5-7GB 分 2-3 批。
+分批流程:Claude 复制一批 → CRC 跑脚本(自动跳过已完成)→ 用户手机删该批副本并**清空
+回收站**(不清空不释放配额)→ 下一批。文件夹共享已生效,后续文件自动继承。
+提醒:(a) 根目录多余 shard_01 副本(0.59GB)可立即删+清回收站;(b) 查空间:Drive App
+"存储空间"或 drive.google.com/settings/storage,用户报数后按实际定批次;(c) 不换账号
+则复制限流仍挂在本账号上,清空间与等限流解除两件事并行,若限流久拖不解,换账号仍是备选。
+
+### 2026-08-12续9 — 用户决定换账号;流程与"对话是否受影响"的说明
+
+用户确认切换到大容量 Google 账号。已澄清:切换的只是 Google Drive 连接器的授权账号,
+claude.ai 登录不动 → 对话 history 全保留、其他运行中的对话不受影响;切换后所有对话的
+Drive 工具指向新账号。流程(已发给用户):(1) claude.ai 设置→连接器→Google Drive→断开
+→重连,用大容量账号授权;(2) 告知 Claude 验证身份(本会话若拿不到新凭证则新开对话,
+凭本日志冷启动);(3) Claude 在新账号建文件夹+复制剩余 24 shard(新账号预计无限流);
+(4) 用户手机共享新文件夹(anyone with link: viewer);(5) Claude 生成完整 26 ID 列表
+(NYU 旧 2 + 新 24),用户 scp 至 CRC 跑 download_own_copies.sh;(6) 26/26 落地后删
+两个账号的副本+清空回收站。NYU 已公开的 shard_01/05 不受切换影响,无需重做。
+**等待:用户完成连接器切换。**
+
+### 2026-08-12续10 — 🎉 26/26 shard 全部复制完成(新账号);总量修正为 21.09GB
+
+用户完成连接器切换(新账号 haojiayi459@gmail.com,本会话直接拿到新凭证,无需换对话)。
+执行记录:
+1. 新账号建文件夹 `opentouch_own_copies_v2`(ID `1EuMbRkMNRczlvgvY_i4gHJmYZoPrgCYp`)。
+2. 测试复制 shard_02(1.72GB,旧账号上反复失败的那个)→ 秒级成功 → **确认限流是账号级,
+   新账号干净**。
+3. 应用户要求,把 NYU 的 shard_01/05 副本也复制进新文件夹(从 NYU 公开副本复制,不碰
+   被标记的原始文件)→ 26 个全部集中在一个文件夹。
+4. 剩余 shard 按**每批 3 个 + 批间 120 秒**(后台 sleep 定时器自动唤醒)分 8 批复制,
+   10:08Z 开始、10:24Z 结束,**零失败、零限流**。上次触发限流的教训(一次并发 7 个)
+   得到验证:限速分批是正确策略。
+5. **数据总量修正:26 shard 实际合计 21,094,206,555 B ≈ 21.09GB**,此前记录的"14.6GB"
+   有误(单文件 137MB~1.97GB,分布很不均匀)。幸而换了账号——留在 NYU 清 14GB 也不够。
+   CRC 流式脚本峰值磁盘占用 = 最大单文件 ≈ 2GB,依然安全。
+6. 完整 26 个新 ID 已写入 repo `data/own_copy_ids_full.txt`(含大小注释,可直接作为
+   download_own_copies.sh 的 IDS_FILE)。`own_copy_ids_partial.txt` 和
+   `opentouch_remaining_ids.txt` 作废(文件头已注明 superseded)。
+7. NYU 账号的 opentouch_own_copies 文件夹 + 根目录多余 shard_01 副本已全部冗余,用户
+   可删除并清空回收站(约 1.96GB)。
+
+**待办**:(a) 用户手机上对 `opentouch_own_copies_v2` 做"知道链接的任何人:查看者"共享
+(已挂 2 分钟间隔的公开探测,命中后 Claude 会本地 gdown 实测 shard_22 验证继承);
+(b) 用户把 `data/own_copy_ids_full.txt` scp 到 CRC,跑
+`bash scripts/crc/download_own_copies.sh <ids文件>`;(c) labels 不变(459KB,原始 ID,
+脚本在 final_annotations 缺失时自动获取);(d) 26/26 落地 CRC 后删两个账号的副本+清空
+回收站,继续 eval harness 的 Q1-Q6 与 GRU-aggregate fork 工作。
+
+### 2026-08-12续11 — 共享生效+链路验证;发现并修复两个"副本改名"引入的 bug(会让 CRC 全盘失败)
+
+**1. 新账号文件夹共享已生效并验证通过。**探测第 1 次即命中;本地匿名 gdown 实测下载
+shard_22 副本(eat_ygf_p1.hdf5)成功,137,436,536 字节与 Drive 一致,h5py 打开正常
+(calibration/data/transform_slam_to_rgb)。测试文件已删。旧账号的每小时限流探测已停止
+(26/26 已完成,不再需要)。
+
+**2. 发现两个 bug——根因都是我把副本命名为 `opentouch_shard_NN`(无扩展名):**
+- **Bug A(会让 26 个全部失败)**:`download_own_copies.sh` 靠 `ls "$SHARDS"/*.hdf5` 找
+  下载产物(第 82 行),而 gdown 用 Drive 标题命名文件。副本标题没有 `.hdf5`,glob 必然
+  落空 → 每个 ID 都判为 "no hdf5 produced" 记入 failed。
+- **Bug B(比 A 严重,是静默数据损坏)**:`extract_opentouch.py:195`
+  `stem = splitext(basename(--shard))[0]`,该 stem 是 shard 身份,构成
+  `shard_key = f"{stem}::{group}"`(第 210 行),既是 manifest 的 `shard` 字段(255 行),
+  也是幂等去重键(211 行 `if shard_key in seen: continue`)。所以"把下载文件统一命名成
+  shard.hdf5"这种看似简单的修法会让 26 个 shard 的 stem 全部相同 → 不同 shard 中同名
+  group 的 clip 被静默丢弃,正是 2026-08-10 那类 cache 损坏。**原始文件名是承载语义的。**
+- **额外理由**:用回原始名,clip id 与 07-02 那次成功抽取留在 CRC 缓存里的记录保持一致,
+  续跑时幂等判断才正确;若改名,同一份数据会被当成新 shard 重复抽取。
+
+**3. 修复:**
+- 用 `get_file_metadata` 取回全部 26 个**原始文件名**(只读操作,无限流风险),并用文件
+  大小与我记录的副本大小逐一交叉验证 → **26/26 字节数完全吻合,编号映射确认无误**。
+  真实场景名:office_csail_p1/p2、office_ml_p1/p2、home_kitchen_p1/p2/p3、home_bedroom、
+  hardware_homedepot_p1..p5、sports_dicks_p1/p2、grocery_plant、grocery_target_p1/p2/p3、
+  grocery_tj、eat_mcdonalds、eat_ygf_p1/p2、fablab_ml_p1/p2/p3(26 个,互不重复)。
+- `data/own_copy_ids_full.txt` 改为两列格式 `<副本ID>  <原始文件名>`(带大小注释)。
+- `download_own_copies.sh` 增加可选文件名列:`read -r IDFIELD NAME <<< "$RAW"`(bash 3.2
+  兼容),有名字则 `gdown "$ID" -O "$NAME"` 并直接按该路径取文件,无名字则回退原 glob;
+  行内 `#` 注释用 `sed 's/#.*//'` 剥离;清理改为 `rm -f "$SHARDS"/*`(该目录是本实例专属,
+  只可能存放一个下载产物);汇总的 `done:` 改为统计**本次 ID 文件**的完成数(原先是
+  `wc -l done_own_ids.txt`,跨多次运行会串数)。
+
+**4. 本地测试(假 gdown/假抽取器,不发网络请求):**
+- 真实的 26 行 ID 文件全跑通:26/26,**记录到的 stem 26 个全部唯一**,无 `#`/空格污染
+  (证明行内注释解析正确)。
+- 断点续传:重跑 26 行全部 "already done",**重复抽取 0 次**。
+- 混合格式:带名字 / 完整分享链接+名字 / 纯 ID 无名字 / 故意失败 → 前两者正常,纯 ID
+  无名字的那条正确判失败并记入 `failed_own_ids.txt`(**这正是安全的失败模式**:宁可报错,
+  不静默抽错),故意失败的也记录且不中断。
+- 并发锁:第二实例被拒(FATAL + 退出码 1)。
+- bash 3.2 兼容(无 mapfile)、`bash -n` 语法检查通过。
+- 真实 `gdown ID -O NAME` 的调用形式已在本次两次真实下载中验证过(经过 Drive 的
+  virus-scan confirm 重定向,正常工作)。
+
+**5. 清理**:删除 `data/own_copy_ids_partial.txt` 和 `data/opentouch_remaining_ids.txt`
+(均已作废;partial 指向即将被删的 NYU 副本,留着会导致 scp 错文件白跑一趟)。
+
+**下一步(用户在 CRC 执行)**:
+```bash
+scp data/own_copy_ids_full.txt <CRC>:~/            # 从本地 repo
+ssh <CRC>; cd ~/TouchAnything
+bash scripts/crc/download_own_copies.sh ~/own_copy_ids_full.txt
+```
+若报 `FATAL: ~/opentouch/final_annotations missing`,先取一次 labels(459KB,从未撞配额):
+`cd ~/opentouch && gdown 1cM-816vcCnkgWVIGXZrR1o8TPsDvRVCZ && unzip -o final_annotation.zip`。
+峰值磁盘 ≈ 最大单文件 1.97GB(边下边抽边删)。全部落地后可删两个账号的副本+清空回收站。
+代码改动尚未 commit(等用户确认后再提交)。
+
+---
+
+## SESSION (2026-08-12续12) — Q1–Q6 全部拍板;阶段 1 全部实现并通过单测;含一处对我 08-11 论断的方向性更正
+
+本节是 eval-harness/G2 线的工作,与上面的下载线并行、互不依赖。下载线状态见续11(26/26 副本
+已就位、链路已验证,等用户在 CRC 跑脚本)。
+
+### 用户 2026-08-12 逐条回答(原样记录,不做转述)
+| Q | 用户结论 |
+|---|---|
+| Q1 | 逐 channel 分开报。但 **R² 的 baseline 用 TEST mean**——"这不会造成 leakage,因为 y_test(mean) 没有被模型用于产生预测,这一步计算是在预测之后"。→ **Primary standard R² = 对应 TEST subset 的 clip-balanced channel mean**;TRAIN mean 另算 **R²_OS / train-mean skill 作为 robustness metric,但不是 standard R²**。 |
+| Q2 | 修改后确认:**不平均 per-clip R²;也不能直接平均 raw SSE。必须 clip 内除以有效点数**,使每条 clip 总权重相等,再聚合 SSE/SST。 |
+| Q3 | **暂不确认原集合为 final。** 先定义 smooth/abrupt 的物理判据(rubric),清单是 rubric 的推论。三层结构:①语义 rubric(先验)②量化 manipulation check(后验验证,**不用于重新分类**)③预注册的敏感性分析(剔除争议子集重算)。明确裁定:cutting→abrupt、flipping→abrupt、scraping→smooth、pouring/stirring/spreading/drawing/writing/carrying→smooth(无争议);scooping/serving/eating/drinking 含混合子事件,走第三层。rubric 写进 `trait.py` docstring。 |
+| Q4 | 确认:**G1 paired clip bootstrap;G2 smooth/abrupt 独立 stratified clip bootstrap,不做人为 pairing。** |
+| Q5 | **B=5000 formal / 500–1000 dev**;seed 冻结**升级为** `default_rng` + 记 numpy 版本 + paired 索引共享写进单测。 |
+| Q6 | **现在单独 fork deterministic GRU-aggregate**;CNN-map / flatten-map 继续暂缓。 |
+
+Q3 的适用范围经 AskUserQuestion 追问后由用户选定:**"全词表审计"**——rubric 是定义,清单是推论,
+对已知 action 逐个给 rubric 判定,`trait_class` 对未审计 action 抛错而非默认 abrupt。用户在选择时
+已知情该选项会把 `holding`/`sliding` 判入 smooth、smooth 类从 ~108 扩到 300 量级。
+
+---
+
+### Q1 —— 我同意用户,并且必须更正我自己 08-11 的判断:方向搞反了
+
+08-11 我写的是"用 TEST 均值会泄漏 TEST 信息进基线,数字会**虚高**"。**这句话的方向是错的**,现在
+更正并留档(不是悄悄删掉):
+
+样本均值**最小化**它自己那个样本上的平方误差,所以
+`SSE_base(class_mean) ≤ SSE_base(train_mean)`,分母更小 ⇒
+
+    R²(class_mean) ≤ R²(train_mean) ≡ R²_OS
+
+即 **TEST-mean 分母是两者中更严格的那个,不是更好看的那个**。我当时把"基线用了 TEST 信息"直接
+等同于"结果偏乐观",没有算方向。用户的论证在自己的层面上也成立:均值是在模型出完预测之后才用到
+的,模型从未见过它,因此不构成预测意义上的 leakage。两条合起来:用户的选择既是标准 R² 的教科书
+定义,又恰好是更保守的一侧。**这条不等式已写成单测**(`test_train_mean_r2_is_never_stricter_than_class_mean_r2`),
+不是靠 docstring 声明。
+
+三层落地(`aggregate.py`):
+- **primary `class_mean`** —— 被打分的那个 TEST subset 自己的 clip-balanced per-channel 均值 = standard R²;
+- **secondary `train_mean`** —— R²_OS(Campbell-Thompson 式),真正的样本外预测力陈述,报作 robustness,**不叫 R²**;
+- **另备 `clip_mean`** —— 每条 clip 对**自己的均值**,即 within-clip variance explained。见下面 OQ-J:这不是多余选项,它对本语料有实质影响。
+
+逐 channel 报告 + 算术平均作 headline:已实现为 `R2Result.per_channel` / `.headline`,docstring 与
+单测都写明**结论以 per-channel 表为准,headline 不得单独报**(万一只有 CoP 有 trait 效应,平均会抹掉)。
+
+### Q2 —— per-clip 等权的精确实现,和一个必须一起定死的连带选择
+
+实现为 `mean_over_clips(SSE_model_k/n_k) / mean_over_clips(SSE_base_k/n_k)`(ratio of means,
+不是 mean of ratios)。三处细节是在写的时候才浮出来、必须一起钉死的:
+
+1. **`n_k` 逐 channel 计数。** CoP 在低力时被 mask、force 从不被 mask,所以同一条 clip 可能贡献
+   900 个有效 force 点、只有 40 个有效 CoP 点。若用统一的 n,CoP 的权重会被 force 的点数决定。
+   某 channel 有效点为 0 的 clip **只从该 channel 掉出**,且分子分母用同一批 clip(否则比值在比
+   两个不同总体)。
+2. **"clip-balanced mean"必须是"各 clip 自身均值的无权平均",不是点加权总均值。** 这不是口味问题:
+   对目标 `J(μ)=mean_k[(1/n_k)Σ(y-μ)²]` 求导得 `μ* = (1/K)Σ_k mean_k(y)`。用点加权总均值会让
+   "均值基线"在我们实际聚合的加权下**不是最小值点**,于是一个什么都没解释的模型也能"战胜均值"、
+   R² 虚假为正。单测 `test_clip_balanced_mean_is_the_exact_minimizer` 用长度 2 vs 8 的两条 clip
+   把两种均值拉开(5.0 vs 8.0)并验证扰动 μ 一定使目标上升。
+3. **计数单位是 (origin, horizon-step) 对,不是唯一帧。** stride=1、H=30 时同一帧会在最多 30 个
+   窗口里作为 target 出现。这是 harness 既有约定(`metrics.py` 就是在 N*H 上聚合),保持一致才能
+   让 R² 和 MSE 描述同一个点集。
+
+**比"存 SSE"更进一步:存充分统计量。** 每 (clip, channel) 存 `(n_valid, Σy, Σy²)` + 每个预测器一列
+SSE。对任意常数 μ,`SSE = Σy² − 2μΣy + nμ²` 闭式可得。三个收益:
+- **bootstrap 每个 resample 可以重算它自己的 clip-balanced 均值**。均值是被 resample 的统计量的
+  一部分,当成固定值会**低估方差**。有了充分统计量这件事是免费的(`test_r2_bootstrap_recomputes_the_mean_inside_each_resample`)。
+- 第三层敏感性分析(剔除争议 action 重算)退化为几百行表的代数,**不重训模型、不重滚 origin**。
+- per-clip MSE、三种分母的 R²、ΔR²、skill 全部出自同一遍前向。
+
+用户"不能直接平均 raw SSE"的理由已被单测固定(`test_long_and_short_clips_get_equal_weight`);
+"不平均 per-clip R²"的理由也被固定:构造一条自身均值恰等于类均值的近常数 clip,它的 per-clip R²
+爆到 >1e4,而 ratio-of-means 保持有限(`test_ratio_of_means_survives_a_degenerate_clip...`)。
+
+### Q3 —— rubric 冻结 + 全词表审计的结果(**有需要用户签字的判断,见 OQ-L / OQ-M**)
+
+`src/opentouch/trait.py` 已建,docstring 即预注册文本。原 2026-08-07 那个临时集合**被取代,不是
+搬家**。
+
+**应用 rubric 时我不得不加两条细化,都写进了 docstring**,因为不加就自相矛盾:
+- **(R1) 事件算在"手的机械耦合"上,包括经由握持工具传递的冲击。** 手套测的是手。刀砍到砧板并不
+  改变手-刀的接触状态,但冲量经刚性工具传到手、在 F 上一目了然。这正是用户裁定 cutting→abrupt
+  所隐含的判据;同一条也让 scooping(勺撞碗)可疑。
+- **(R2) 构成性事件才算;框住持续段的附带 onset/offset 不算。** 几乎每个动作都以建立接触开始,
+  所以"有接触 onset"不能当判据,否则全都是 abrupt。要问的是:离散事件**就是**这个动作(去掉它
+  动作就没发生:press 没有致动就不是 press,place 没有 release 就不是 place),还是它只是一个
+  持续段的前后铺垫(倒水前要握住壶,但 pouring 是持续倾倒,握持是准备动作、通常落在标注窗之外)。
+  **没有 (R2),pouring 和 carrying 会被判成 abrupt,与用户的明确裁定冲突。**
+
+**审计表(30 个 action = n≥30 的 14 个 ∪ 旧 SMOOTH 集合的 16 个)。`[U]`=用户明确裁定,`[R]`=我按
+rubric 推出,`+`=列入争议子集:**
+
+| SMOOTH(12) | n | 依据 | | ABRUPT(18) | n | 依据 |
+|---|--:|---|---|---|--:|---|
+| holding | 119 | [R] 持续接触、零构成性事件 | | picking up | 974 | [R] grasp+离面即动作本身 |
+| sliding | 55 | [R] 与 wiping 同构 | | placing | 253 | [R] 触面+release 即动作 |
+| wiping | 20 | [R] 沿用 | | pulling | 247 | [R]+ |
+| pouring | 7 | [U] | | pressing | 237 | [R] 致动转换即动作 |
+| stirring | 5 | [U]("无争议") | | pushing | 154 | [R]+ |
+| cleaning | ? | [R] wiping 类 | | grasping | 111 | [R] |
+| scraping | ? | [U] | | adjusting | 89 | [R]+ 含 re-grip |
+| spreading | ? | [U] | | turning | 84 | [R]+ 旋钮 vs 翻页 |
+| drawing | ? | [U] | | moving | 78 | [R]+ 推移 vs 取放 |
+| writing | ? | [U] | | touching | 82 | [R] 建立接触即动作 |
+| carrying | ? | [U] | | removing | 57 | [R] 分离即动作 |
+| lowering | ? | [R]+ | | inspecting | 32 | [R]+ |
+| | | | | flipping / serving / eating / scooping / cutting | 12/10/8/8/4 | [U]+ |
+| | | | | drinking | ? | [U]+ |
+
+**争议子集 = 13 个**:lowering, pulling, pushing, adjusting, turning, moving, inspecting,
+cutting, flipping, scooping, serving, eating, drinking。已知 clip 数合计 ≈ 726(约占语料 25%),
+剔除后 smooth 仍剩 ≈ 215、abrupt ≈ 1710,**功效充足**。
+
+**三个必须点名的后果:**
+1. **`108 / 2,850` 这两个数字正式作废**(既因 join bug 修复,更因分类变了)。下载落地后用最终
+   manifest 重数。按已知计数粗估:smooth ≈ 206+(holding 119 + sliding 55 + wiping 20 + pouring 7
+   + stirring 5,另 7 个 action 计数未知)、abrupt ≈ 2,440+。smooth 占比从 ~4% 升到 ~8–9%,
+   **G2 的功效比原计划好,不是差**。
+2. **预注册的可falsify预测仍然成立**:语料仍是 ~92% abrupt,"OpenTouch 整体 1s skill 应明显低于
+   ActionSense 的 +0.166"这条不受影响。但"96% abrupt"这个具体数字必须在文档里改成实测值。
+3. **争议子集恰好覆盖了历史 probe 与新 rubric 打架的全部动作**(serving/eating/scooping 在 07-02
+   probe 里 PI 排名最高,却在新 rubric 下是 abrupt)。这不是巧合造成的麻烦,而是设计自洽的证据:
+   **唯一真实的威胁刚好被预注册的敏感性分析正面覆盖**。
+
+**第二层统计量已冻结(定义写死,执行等 splits)**:每条 clip 上,因果滤波后 force 的 |ΔF| 的 95
+分位;按 action 取中位数;另报 >3 Hz 能量占比佐证;**只在 TRAIN split 上算**。两处必须说明的:
+- **用户写的"15 Hz"与冻结配置不符**:`configs/opentouch/eval_harness.yaml` 是 `fps_raw: 30.0`、
+  `downsample: 1`,即有效 30 Hz,所以 |ΔF| 是 **33 ms 帧间跳变**,不是 67 ms。代码从 cfg 取率,
+  不写死;此处按 30 Hz 记录。
+- "因果滤波"我冻结为**严格因果的 3 帧滑动平均**(100 ms @30 Hz,左侧 padding,只用当前与过去),
+  并且**会同时报 k=1(不滤波)的版本**,证明结论不依赖这个选择——滤或不滤都是一个自由度,与其
+  单选一个,不如把两个都报。
+- clip 太短(一阶差分 < 20 个)的**排除并计数**,不是补 0(补 0 会把短 clip 伪装成"无事件")。
+- `per_action_stat` 同时输出 action **内部**的 p25/p75/min/max,直接服务于 docstring 里写明的
+  粒度局限:同一 action 跨被试可能横跨两类,这一点报告但**不改分类**(按 clip 分类会引入"用信号
+  性质选样本、再测该信号可预测性"的更严重循环)。
+
+**硬纪律已落进代码而不只是口头**:`trait_class` 对未审计 action 和空标签**抛 `UnauditedAction`**,
+不默认 abrupt——默认会让 66 个 action 里未审计的 36 个尾巴悄悄填满多数类;`partition()` 把
+`unlabeled`/`unaudited` 作为**可计数的掉出项**返回,任何 G2 数字旁边都必须报这两个数。
+
+### Q4/Q5 —— bootstrap:paired 的共享做成结构性的
+
+- **G1 paired**:`bootstrap_paired(stat_fn, ...)` 每轮只生成**一个** row-index 数组交给 `stat_fn`,
+  由 `stat_fn` 自己在这批 clip 上给两个模型打分并取差。**共享是结构性的,不可能被"不小心抽两次"
+  破坏**。单测构造了两个误差高度相关(共享 clip 难度)的模型:paired 区间宽度 < 独立重采样的 20%,
+  且 paired 检出真实的 0.5 差距而独立重采样漏检——Q4 的 G1 设计理由就此被钉成可执行断言。
+- **G2 two-sample**:两组各自独立、**各自在层内**重采样。stratified 的层由调用方给,默认意图是
+  **按 action 分层**——理由:全词表审计后 smooth 类被 holding/sliding 主导,不分层的抽样可能返回
+  一个几乎全是 holding 的 resample,把"类的区间"变成"单个 action 的区间"。层内抽样**精确保持
+  每层 clip 数**(单测逐层核对)。分层轴见 OQ-K。
+- **B**:`B_FORMAL=5000` / `B_DEV=500`。`default_rng`(PCG64),绝不用 legacy 全局 `np.random.*`;
+  `rng_provenance()` 输出 numpy 版本 + bit generator 名 + seed + B,**冻结 seed 只有在生成器也被
+  记录时才真的能复现**。区间报 `bias = mean(samples) − point`,偏斜时看得见,不藏在对称区间里。
+
+### Q6 —— GRU-aggregate 单独 fork(已完成)
+
+`src/opentouch/gru_aggregate.py` + `configs/opentouch/gru_aggregate.yaml`。CNN-map / flatten-map
+**刻意不在其中**,继续暂缓。与 ActionSense 原版的三处**有意**差异:
+1. **确定性点预测**,MSE 损失。原版的 Gaussian NLL 头 + logvar + sigma 校准**移除而非停用**——
+   从不做概率评分的概率头是不可falsify的装饰,且 MSE 才是 harness 实际打分的口径。
+2. **channel 数取自数据**(3 而非硬编码 6)——正是其它 OpenTouch fork 修的同一类 bug。
+3. **走 harness split 协议**(TRAIN 拟合 / VAL 选参 / TEST 只碰一次),不是原版的 5-fold CV;
+   因此**不依赖 `splits.py`**(由调用方给 id 列表),这就是它能在 splits 仍阻塞时写完并测完的原因。
+
+保持不变的约定(为了让数字与 ActionSense 四路表可比):左零 padding 使**每个 harness origin 都有
+预测**(`score_external` 对齐)、residual-over-persistence 目标(输出 0 即复现 persistence)、
+origin 来自同一个 `baselines.origins()`。确定性:`configure_determinism` 固定 torch seed、
+`use_deterministic_algorithms`、shuffle 用显式 `torch.Generator`;docstring 注明 **CUDA 上 cuDNN
+的 RNN kernel 不保证确定性**,GPU 跑必须记这条 caveat 而不能声称逐位可复现。
+
+### 新增/修改文件
+| 文件 | 说明 |
+|---|---|
+| `src/opentouch/trait.py` | 新建。rubric + 30 action 审计表 + 13 个争议子集 + 第二层统计量。预注册artifact。 |
+| `src/opentouch/aggregate.py` | 新建。per-clip 充分统计量、clip-balanced 均值、三种分母的 R²、ΔR²、skill。 |
+| `src/opentouch/bootstrap.py` | 新建。paired / stratified two-sample clip bootstrap、percentile CI、rng provenance。 |
+| `src/opentouch/gru_aggregate.py` | 新建。deterministic point-prediction GRU-aggregate fork。 |
+| `configs/opentouch/gru_aggregate.yaml` | 新建。模型/优化超参;history sweep {1,2,3}s(OQ-H)。 |
+| `src/opentouch/baselines/base.py` | 新增 `predict_series_by_clip`(返回 `clip_ids`);`predict_series` 改为其薄包装,**既有调用方与单测零改动**。 |
+| `src/opentouch/baselines/__init__.py` | 导出新函数。 |
+| `tests/test_opentouch_g2.py` | 新建,29 测试(trait / aggregate / bootstrap,纯 numpy)。 |
+| `tests/test_opentouch_gru_aggregate.py` | 新建,torch 相关,本机 skip。 |
+
+`src/actionsense/` **仍然零改动**;`metrics.py` 仍是逐字 fork(新的聚合逻辑放在独立的
+`aggregate.py`,不污染"scoring 定义与原版一致"这个声明)。
+
+### 测试结果
+`pytest tests/test_harness.py tests/test_harness_opentouch.py tests/test_opentouch_g2.py
+tests/test_opentouch_gru_aggregate.py` → **43 passed, 1 skipped**(skip = torch 文件)。
+其中既有 14 个回归(原 harness 单测全绿),新增 29 个。
+
+**过程中被单测抓出的两个真实问题,记录下来:**
+1. 我最初两个测试 fixture 自己是错的(近常数 clip 的自身均值并不等于类均值;全零 target 让分母
+   消失)——不是模块 bug,而是**分母消失时模块正确地返回 NaN 而没有悄悄给 0 或 1**,守卫按设计
+   工作。fixture 已修。
+2. `pytest.importorskip("torch")` **只捕 ImportError**;本机 torch 是半装状态(缺
+   `libtorch_global_deps.dylib`),`import torch` 抛 **OSError**,会让整个 pytest **collection 中断**,
+   连纯 numpy 的 G2 测试一起拖死。改成 `try/except Exception` + `allow_module_level=True` 的显式
+   skip。→ **GRU-aggregate fork 本机只做了 AST 编译检查 + 逻辑审查,未经 torch 实际执行**,这一点
+   不得在后续记录里被含糊掉;真正的验证要在 CRC(有可用 torch)上跑那 8 个测试。
+
+---
+
+### 新的 OPEN QUESTIONS(阶段 1 代码已就绪,但这几条会改变**报什么数**,需要你拍板)
+
+- **OQ-J(最重要):standard R² 的分母该用 `class_mean` 还是 `clip_mean`?**
+  你选的 `class_mean` 是一个类一个常数(逐 channel)。本语料 clip 短(中位 2.80 s)而各 clip 的
+  DC 力水平差异大,于是 **SST 会被 clip 之间的水平差主导**;任何只要能跟住"当前水平"的模型
+  (persistence 免费就能做到)都会拿到很高的 R²,却没有解释任何**动态**。而 trait 假说问的正是
+  clip 内部的动态可预测性。`clip_mean`(每条 clip 对自己的均值)隔离的就是这部分。
+  两者代码同一条路径、成本相同,已都实现。**我的建议**:primary 仍按你的裁定用 `class_mean`
+  (它是标准 R² 且更严格),但把 `clip_mean` 版本作为**并列主表**报出而不是附录——如果两者结论
+  方向不一致,那本身就是关于"效应来自水平还是来自动态"的关键证据。请裁定要不要这样报。
+- **OQ-K:G2 stratified bootstrap 的分层轴是什么?** 我按"action"实现(理由见上:防止 resample
+  被 holding 吞掉),但代码接受调用方给任意层标签,改成 scene/participant 零成本。若 split 轴最终
+  定为 scene 级留出,分层轴与 split 轴的关系需要一起想清楚。
+- **OQ-L:`eating`/`drinking`/`scooping`/`serving` 的主标签定为 abrupt——确认?** 你说这四个
+  "含混合子事件、建议用第三层处理、而不是硬塞"。第三层需要它们各自有一个主标签,我按 rubric 严格
+  执行(R1:勺-碗碰撞、食物 release)判为 **abrupt**,同时全部列入争议子集。这与 2026-08-07 旧集合
+  **相反**(旧集合把四个都算 smooth),也与 07-02 probe 的 PI 排名相反。**这是我的推论,不是你的
+  裁定,需要签字。**
+- **OQ-M:`pulling`/`pushing`/`adjusting`/`turning`/`moving`/`inspecting` 判 abrupt + 列入争议
+  子集——确认?** 这 6 个共 684 clip。它们在 (R2) 下是真正的边界:持续位移是动作主体(偏 smooth),
+  但典型实例含抓取接合与终止碰撞(偏 abrupt)。我选 abrupt(与既有文档一致、且 OpenTouch 场景多为
+  货架/抽屉/门)并全部列入争议子集,使敏感性分析覆盖它们。
+- **OQ-N:ΔR² 的两个分母不同类。** `class_mean` 下 smooth 与 abrupt 各用自己类内方差作分母,这正是
+  "class-specific R²"的定义,但也意味着 **ΔR² 同时受"可预测性差异"和"类内方差差异"影响**。
+  OQ-A 已把 raw MSE/MAE 定为 secondary 佐证,可部分对冲;`clip_mean` 版本(OQ-J)也能帮助分离。
+  是否还要加一个"两类共用同一 pooled 均值"的第三种诊断?我倾向**不加**(又一个自由度),但要你知道
+  这个解释性限制存在,而不是让它在审稿时才被指出。
+
+### 状态
+阶段 1(零数据依赖)**已全部完成并通过单测**,准备 commit(独立 commit,日期即预注册时间戳)。
+阶段 2(下载落地后):用最终 manifest 重数两类 clip 数、跑 G2 探索版。阶段 3(splits.py 解决后):
+G1/G2 正式版。**OQ-J~N 不阻塞 commit,但阻塞"报哪张表"**;OQ-L/OQ-M 若被否决,只需改
+`trait.py` 的表并重跑单测(改动局部,但必须在**看到任何 G2 数字之前**改,否则就成了 post-hoc)。

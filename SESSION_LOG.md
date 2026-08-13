@@ -3600,3 +3600,52 @@ G1/G2 正式版。**OQ-J~N 不阻塞 commit,但阻塞"报哪张表"**;OQ-L/OQ-M 
 状况、与本次改动无关**,但它会让未来的会话把这个中断误读成"新代码坏了",所以给它加了与
 `test_opentouch_gru_aggregate.py` 相同的 `try/except` + `allow_module_level=True` 守卫(torch 正常
 时行为不变)。现在 `pytest tests/` → **43 passed, 2 skipped**(两个 torch 文件)。
+
+### 2026-08-13 — CRC 首次实跑 download_own_copies.sh:25/26 成功,2876 clips 入 cache
+
+用户在 crcfe01(ND CRC 前端节点,UGE 集群)上完成首次实跑。前置检查:无残留进程、无残留锁
+(之前记录的"每 3 小时自动重试循环"在 CRC 上并不存在或早已退出——SESSION_LOG 里那条记录
+无法在任何机器上被证实,今日确认 crcfe01 干净)。传输方式:从本地 Mac `scp -J` 经 bastion
+跳板传两个小文件(ID 清单 + 修好的脚本),21GB 数据全程不经过本地。
+
+**结果**:
+```
+cache:  /users/jhao3/opentouch/cache  (227M, 2876 clips)
+done:   25 / 26 ids
+FAILED: 1 -> /users/jhao3/opentouch/failed_own_ids.txt
+```
+- **"制作副本→文件夹公开→匿名 gdown"整条路线在真实环境下跑通**,配额问题彻底解决。
+- 227MB cache / 21GB 原始数据 ≈ 1% —— 流式抽取的价值得到验证(峰值磁盘约 2GB)。
+- 2876 clips vs 论文宣称的 2,900,差额大概率来自失败的那 1 个 shard。
+- 环境注意点(已发现):`gdown` 不在 `environment_tactile_cuda.yaml` 里(当初手动 pip 装),
+  跑之前需 `conda activate tactile`;h5py/numpy 在 yaml 中。
+
+**待办**:重跑同一条命令(脚本会跳过已完成的 25 个,只重试失败的 1 个),并确认失败的是哪个
+shard。若重复失败则重新"制作副本"换新 ID。之后即可恢复 eval harness(Q1-Q6)与
+GRU-aggregate fork 的代码工作。
+
+### 2026-08-13续 — 26/26 全部落地(2904 clips);并更正我本会话一处过时论断
+
+**下载彻底完成**:用户重跑同一条命令,脚本跳过已完成的 25 个、自动重试失败的第 19 个
+(`grocery_tj.hdf5`)并成功。最终:
+```
+cache:  /users/jhao3/opentouch/cache  (232M, 2904 clips)
+done:   26 / 26   FAILED: none    (failed_own_ids.txt 为空)
+```
+2904 clips 与论文宣称的 2,900 相符。**断点续传逻辑在真实环境得到验证**(不是只在本地
+假 gdown 下测过)。232MB cache / 21GB 原始数据 ≈ 1%。
+
+**自我更正(重要)**:我在本会话多次说"下载完成后继续 Q1-Q6",这是**错的**——Q1-Q6 已于
+2026-08-12 全部拍板,阶段 1 代码(trait.py / metrics / bootstrap / GRU-aggregate fork)已实现
+并通过单测(`pytest tests/` → 43 passed, 2 skipped)。我引用的是 3003/3088 行那两条早已被
+后续会话取代的旧状态,没有先读到 3360 行之后的内容就下了结论。**当前真正的阻塞是 OQ-J~N**,
+它们不阻塞 commit,但阻塞"报哪张表"。
+
+**下一步的正确顺序(有一个不可颠倒的约束)**:
+1. **先做描述性重数**(已写好 `recount.py`,只输出 clip 计数,**不含任何 R²/模型输出**):核实
+   26 个 shard 全在 manifest 里、clip_id 无重复(即 Bug B 的 stem 冲突在生产环境确实没发生)、
+   并用**真实 manifest** 刷新 OQ-L/OQ-M 论证所依赖的过时数字(108/2,850 来自 join bug 修复前;
+   OQ-M 的"684 clip"同样是旧数)。计数是设计信息、不是结果,不构成 post-hoc。
+2. **再请用户裁定 OQ-J / OQ-L / OQ-M / OQ-N**。SESSION_LOG 已明确记录:OQ-L/OQ-M 若要改,
+   **必须在看到任何 G2 数字之前改**,否则就成了 post-hoc。因此**在用户签字前不跑 G2 探索版**,
+   哪怕它技术上现在就能跑。OQ-K(G2 分层轴)与 splits.py 的 split 轴耦合,可以等 splits 一起定。

@@ -1,0 +1,40 @@
+# OpenTouch — all 26 shards, copied into haojiayi459@gmail.com's Drive folder
+# "opentouch_own_copies_v2" (1EuMbRkMNRczlvgvY_i4gHJmYZoPrgCYp), shared as
+# "Anyone with the link: Viewer". Copies are new files under that account's own quota,
+# so they are unaffected by the original shared files' download throttle.
+#
+#   bash scripts/crc/download_own_copies.sh data/own_copy_ids_full.txt
+#
+# Format: <copy file ID>  <original filename>
+# The filename column is REQUIRED here. The copies were titled opentouch_shard_NN in
+# Drive, but extract_opentouch.py derives each shard's identity -- and its clip dedup
+# key -- from the local filename's stem, so downloading under the original names is
+# what keeps clip ids stable and consistent with the cache from the 2026-07-02 run.
+# Sizes below were verified byte-for-byte against the originals.
+
+1914FdFOSMe4ewmcorKSX5TNSXHlzSV_J  office_csail_p2.hdf5         #  587 MB
+18GGyRLktZ9QT2_6le_JQyNmN6ShpOiF7  office_ml_p1.hdf5            # 1721 MB
+1ZIgh1H4QaFWrovV8BojXvMkhtvHPqP00  office_ml_p2.hdf5            # 1543 MB
+1AWgm9MkLyg04sDcwfHC0FHcJkQ_zuHY1  office_csail_p1.hdf5         #  713 MB
+1zxviK2B1BLh43HlOJtMrlu1p52kM6_6J  home_kitchen_p3.hdf5         #  193 MB
+1KKFUAg8fex7hHU_KI7FsEanbdo8YGKG1  sports_dicks_p2.hdf5         #  932 MB
+1-dMkQiQtY0vOO4f69H9TVHE_VWa3HZgs  hardware_homedepot_p3.hdf5   # 1061 MB
+1VpOJqRNNLkaM3YLlYQmzKG3e3e2RjDOw  hardware_homedepot_p4.hdf5   #  775 MB
+1g6iHpbiYL-8rE3P_1B3uzE0jL8Gej3nc  hardware_homedepot_p5.hdf5   #  924 MB
+1CeyBBKIHMDJx3ifSr0msW51R4jTUPlr5  home_bedroom.hdf5            #  725 MB
+1yFQnrbGfPNWzdNlfNHaYVkIQlakvCxpV  home_kitchen_p1.hdf5         # 1252 MB
+1APgrsaQ5rJ_2VYtpJRbjZiHB14WiGCZ8  hardware_homedepot_p2.hdf5   #  947 MB
+1iyCafkGWOu8JvuHtA4_Hsx-7cMIk1FN5  home_kitchen_p2.hdf5         #  354 MB
+19VElhih4_34xvnd1acKEzgBR303Q8Zcw  sports_dicks_p1.hdf5         #  785 MB
+1QIVV9HCVf34-U3LYIh1CoKjKXWYLSjl2  grocery_plant.hdf5           #  780 MB
+1daja0N-D110NuECph5iqA0AlpOwR41GE  grocery_target_p1.hdf5       #  684 MB
+1CaW29c9aPYN6b1OutMUt56SZnGJ8OBf1  grocery_target_p2.hdf5       #  868 MB
+1dCMChZea-HMFVappvomZ1XCt3Un3z2h6  grocery_target_p3.hdf5       # 1974 MB
+1PKVDoFhcLQ4GLNpfz-w40yqjG7b8g5Xm  grocery_tj.hdf5              #  953 MB
+12gTudQYV6sIbtyy5NlfR8xfRC3T4y4XZ  hardware_homedepot_p1.hdf5   #  320 MB
+1xcZ0Mx7KCUSq25rFqpu47OSnQ3A2_QYC  eat_mcdonalds.hdf5           #  320 MB
+1mA0lyiN2897EQWPJMLNVzzhkGexLEiY0  eat_ygf_p1.hdf5              #  137 MB
+1eho7TnxICP6-XBIlAc5dpdj2JwJvm6CO  eat_ygf_p2.hdf5              #  371 MB
+1wFRWAicJBvA-iM_b6qoFYcK0Qx9MlxCM  fablab_ml_p1.hdf5            #  837 MB
+1fLUX-xXtGtAOTaWRnh2SrUgmEk0a8VTe  fablab_ml_p2.hdf5            #  908 MB
+1ZbnEOVfNTXflhxPqgIghYboc6fk0CRDW  fablab_ml_p3.hdf5            #  429 MB

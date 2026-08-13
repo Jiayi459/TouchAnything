@@ -16,8 +16,15 @@
 #
 # Usage:
 #   bash scripts/crc/download_own_copies.sh IDS_FILE [WORKDIR]
-#   IDS_FILE: one Drive file ID or share-link per line (e.g. from Drive's multi-select
-#             "Get links"). Blank lines and '#' comments are ignored.
+#   IDS_FILE: one line per shard, "<Drive file ID or share-link>  [original filename]".
+#             Blank lines and '#' comments (whole-line or trailing) are ignored.
+#
+# Give the filename column whenever the Drive copies were renamed. gdown otherwise names
+# the download after the Drive title, and extract_opentouch.py takes the shard's identity
+# -- which is also its clip dedup key (`<stem>::<group>`) -- from that local filename's
+# stem. Copies titled e.g. "opentouch_shard_07" would therefore both break the *.hdf5
+# glob below and, if forced to a single generic name, collide every shard onto one stem
+# and silently drop clips. data/own_copy_ids_full.txt carries the real names.
 set -uo pipefail
 
 IDS_FILE="${1:?usage: download_own_copies.sh IDS_FILE [WORKDIR]}"
@@ -64,22 +71,30 @@ extract_id() {
 
 RAW_IDS=()
 while IFS= read -r LINE; do RAW_IDS+=("$LINE"); done \
-    < <(grep -v '^\s*#' "$IDS_FILE" | grep -v '^\s*$')
+    < <(sed 's/#.*//' "$IDS_FILE" | grep -v '^[[:space:]]*$')
 # ^ portable array-fill (not `mapfile`/`readarray`): macOS ships bash 3.2 (mapfile needs 4.0+);
 #   CRC's bash is unverified from here (no SSH access), so this avoids betting on its version.
-n=0
+n=0; ok=0
 for RAW in "${RAW_IDS[@]}"; do
-    ID="$(extract_id "$RAW")"
+    read -r IDFIELD NAME <<< "$RAW"      # NAME is "" when the line is an id/link only
+    ID="$(extract_id "$IDFIELD")"
     n=$((n + 1))
-    if grep -qx "$ID" "$DONE"; then echo "[$n/${#RAW_IDS[@]}] $ID already done"; continue; fi
-    echo "== [$n/${#RAW_IDS[@]}] $ID =="
-    rm -f "$SHARDS"/*.hdf5 "$SHARDS"/*.h5 2>/dev/null
+    if grep -qx "$ID" "$DONE"; then
+        ok=$((ok + 1)); echo "[$n/${#RAW_IDS[@]}] $ID already done"; continue
+    fi
+    echo "== [$n/${#RAW_IDS[@]}] $ID ${NAME:+-> $NAME} =="
+    rm -f "$SHARDS"/* 2>/dev/null       # per-instance dir: only ever holds one download
 
-    if ! ( cd "$SHARDS" && gdown "$ID" ); then
+    if ! ( cd "$SHARDS" && gdown "$ID" ${NAME:+-O "$NAME"} ); then
         echo "  WARN download failed -> logged, continuing"
         echo "$ID" >> "$FAILED"; continue
     fi
-    SHARD="$(ls -1 "$SHARDS"/*.hdf5 "$SHARDS"/*.h5 2>/dev/null | head -1)"
+    if [ -n "$NAME" ]; then
+        SHARD="$SHARDS/$NAME"
+        [ -s "$SHARD" ] || SHARD=""
+    else
+        SHARD="$(ls -1 "$SHARDS"/*.hdf5 "$SHARDS"/*.h5 2>/dev/null | head -1)"
+    fi
     if [ -z "$SHARD" ]; then
         echo "  WARN no hdf5 produced -> logged, continuing"
         echo "$ID" >> "$FAILED"; continue
@@ -87,7 +102,7 @@ for RAW in "${RAW_IDS[@]}"; do
     echo "  extracting $(basename "$SHARD") ($(du -h "$SHARD" | cut -f1))"
 
     if $PY "$REPO/scripts/extract_opentouch.py" --shard "$SHARD" --labels "$LABELS" --out "$CACHE"; then
-        echo "$ID" >> "$DONE"
+        echo "$ID" >> "$DONE"; ok=$((ok + 1))
     else
         echo "  WARN extraction failed -> logged, continuing"
         echo "$ID" >> "$FAILED"
@@ -99,7 +114,7 @@ echo
 echo "== summary =="
 echo "  cache:  $CACHE  ($(du -sh "$CACHE" 2>/dev/null | cut -f1), \
 $(ls "$CACHE"/state_*.npy 2>/dev/null | wc -l) clips)"
-echo "  done:   $(wc -l < "$DONE") / ${#RAW_IDS[@]} ids in $IDS_FILE"
+echo "  done:   $ok / ${#RAW_IDS[@]} ids in $IDS_FILE"
 if [ -s "$FAILED" ]; then
     echo "  FAILED: $(wc -l < "$FAILED") -> $FAILED"
 else

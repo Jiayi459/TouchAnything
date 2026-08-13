@@ -81,9 +81,11 @@ def main():
         if not picked:
             raise SystemExit(f"no clips for {acts}")
 
-    ncol = None
-    fig = axes = None
-    for row_i, (action, r) in enumerate(picked):
+    # Load everything first: the frame count varies per clip (onset/peak/post may
+    # coincide with an evenly spaced frame), and the last column is an F(t) curve, so
+    # the grid width cannot be taken from the first clip alone.
+    loaded = []
+    for action, r in picked:
         path = os.path.join(args.cache, f"clip_{r['idx']}.npy")
         if not os.path.exists(path):
             raise SystemExit(
@@ -91,17 +93,19 @@ def main():
                 f"summary channels exist; the raw maps need a re-extract without it.")
         p = np.load(path).astype(np.float32)[:, 0]      # (T,16,16), hand axis is 1
         st = np.load(os.path.join(args.cache, f"state_{r['idx']}.npy"))
-        fps = r.get("fps_est") or 30.0
         frames, tags = frame_set(r, p.shape[0], args.frames)
+        loaded.append((action, r, p, st, frames, tags))
 
-        if fig is None:
-            ncol = len(frames)
-            fig, axes = plt.subplots(len(picked), ncol, squeeze=False,
-                                     figsize=(1.5 * ncol, 2.35 * len(picked)))
-        # Per-clip scale (99th pct, not max) so one hot taxel cannot flatten the field.
+    ncol = max(len(f) for *_, f, _ in loaded) + 1       # +1 for the F(t) curve
+    fig, axes = plt.subplots(len(loaded), ncol, squeeze=False,
+                             figsize=(1.5 * ncol, 2.35 * len(loaded)))
+    for row_i, (action, r, p, st, frames, tags) in enumerate(loaded):
+        fps = r.get("fps_est") or 30.0
+        # Per-clip scale (99.5th pct, not max) so one hot taxel cannot flatten the field.
         vmax = float(np.percentile(p, 99.5)) or float(p.max()) or 1.0
         H, W = p.shape[1], p.shape[2]
-        for col in range(ncol):
+        Ft = p.reshape(len(p), -1).sum(1)         # F from the maps themselves
+        for col in range(ncol - 1):
             ax = axes[row_i][col]
             ax.set_xticks([]); ax.set_yticks([])
             if col >= len(frames):
@@ -125,9 +129,27 @@ def main():
                 ax.set_ylabel(f"[{r['idx']}] {action}\n{r.get('object_name', '') or '?'}",
                               fontsize=7)
 
+        # Last column: the whole F(t) curve with the sampled frames marked, so whether
+        # peak_idx really sits at the maximum is read off the curve, not guessed from
+        # how bright a heat map looks under a percentile colour scale.
+        ax = axes[row_i][ncol - 1]
+        t = np.arange(len(Ft)) / fps
+        ax.plot(t, Ft, lw=0.9, color="0.3")
+        for f in frames:
+            ax.axvline(f / fps, color="0.75", lw=0.5, zorder=0)
+        amax = int(np.argmax(Ft))
+        ax.plot(amax / fps, Ft[amax], "v", ms=5, color="tab:blue")
+        pk = tags and [k for k, v in tags.items() if v == "peak"]
+        if pk:
+            ax.axvline(pk[0] / fps, color="crimson", ls="--", lw=1.0)
+        ax.set_title(f"F(t)  argmax@{amax / fps:.2f}s", fontsize=6.5)
+        ax.tick_params(labelsize=6)
+        ax.set_xlabel("s", fontsize=6)
+
     fig.suptitle("OpenTouch raw pressure (16x16), cyan ring = CoP; per-clip colour "
-                 "scale.  F = summed pressure, n = cells above 5% of that scale",
-                 fontsize=9)
+                 "scale.  F = summed pressure, n = cells above 5% of that scale.  "
+                 "Last column: F(t), red dashed = annotated peak, blue triangle = argmax",
+                 fontsize=8)
     fig.tight_layout(rect=(0, 0, 1, 0.96), h_pad=2.2)
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     fig.savefig(args.out, dpi=140)

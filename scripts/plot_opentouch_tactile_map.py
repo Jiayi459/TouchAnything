@@ -97,7 +97,7 @@ def main():
         if fig is None:
             ncol = len(frames)
             fig, axes = plt.subplots(len(picked), ncol, squeeze=False,
-                                     figsize=(1.5 * ncol, 1.9 * len(picked)))
+                                     figsize=(1.5 * ncol, 2.35 * len(picked)))
         # Per-clip scale (99th pct, not max) so one hot taxel cannot flatten the field.
         vmax = float(np.percentile(p, 99.5)) or float(p.max()) or 1.0
         H, W = p.shape[1], p.shape[2]
@@ -114,15 +114,21 @@ def main():
                 ax.plot((cx + 1) / 2 * (W - 1), (cy + 1) / 2 * (H - 1),
                         "o", ms=4, mfc="none", mec="cyan", mew=1.2)
             tag = tags.get(f, "")
-            ax.set_title(f"{f / fps:.2f}s{' ' + tag if tag else ''}", fontsize=7,
+            # F is a SUM over taxels, so the frame of maximum F is not the visually
+            # brightest one: a wide light contact outweighs a concentrated poke. Print
+            # F and the loaded-cell count so the eye is not left to infer it.
+            area = int((p[f] > 0.05 * vmax).sum())
+            ax.set_title(f"{f / fps:.2f}s{' ' + tag if tag else ''}\n"
+                         f"F={F:.0f} n={area}", fontsize=6.5,
                          color="crimson" if tag == "peak" else "black")
             if col == 0:
                 ax.set_ylabel(f"[{r['idx']}] {action}\n{r.get('object_name', '') or '?'}",
                               fontsize=7)
 
-    fig.suptitle("OpenTouch raw pressure (16x16), cyan ring = CoP; "
-                 "per-clip colour scale", fontsize=10)
-    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    fig.suptitle("OpenTouch raw pressure (16x16), cyan ring = CoP; per-clip colour "
+                 "scale.  F = summed pressure, n = cells above 5% of that scale",
+                 fontsize=9)
+    fig.tight_layout(rect=(0, 0, 1, 0.96), h_pad=2.2)
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     fig.savefig(args.out, dpi=140)
     print(f"wrote {args.out}  ({len(picked)} clips)")

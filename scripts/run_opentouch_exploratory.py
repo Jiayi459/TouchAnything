@@ -35,13 +35,11 @@ import os
 import random
 import sys
 
-import numpy as np
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.actionsense.eval_harness.config import load_config          # noqa: E402
 from src.opentouch import evaluate as EV                             # noqa: E402
 from src.opentouch import metrics                                    # noqa: E402
-from src.opentouch.dataset import Norm, eligible_clips, load_group   # noqa: E402
+from src.opentouch.dataset import eligible_clips                     # noqa: E402
 
 
 def adhoc_split(clips, field, seed, frac=(0.6, 0.2, 0.2)):
@@ -99,7 +97,11 @@ def main():
     ap.add_argument("--epochs", type=int, help="override the GRU epochs (smoke runs)")
     ap.add_argument("--histories", help="override the history sweep, e.g. 1,2,3 (seconds)")
     ap.add_argument("--max-clips", type=int, help="subsample the corpus (smoke runs)")
-    ap.add_argument("--skip-gru", action="store_true")
+    ap.add_argument("--model", default="prob_gru",
+                    choices=["prob_gru", "gru_aggregate", "both", "none"],
+                    help="prob_gru = the ActionSense probabilistic GRU (architecture and "
+                         "Gaussian NLL verbatim); gru_aggregate = the deterministic arm")
+    ap.add_argument("--skip-gru", action="store_true", help="alias for --model none")
     ap.add_argument("--out", default="docs/exploratory_opentouch.csv")
     args = ap.parse_args()
 
@@ -120,24 +122,44 @@ def main():
     for m in EV.MODELS:
         rows += emit_rows(cfg, m, results[m], results, tag)
 
-    if not args.skip_gru:
-        import torch  # noqa: F401  (imported late so --skip-gru works without it)
-        from src.opentouch import gru_aggregate as G
+    want = [] if (args.skip_gru or args.model == "none") else (
+        ["prob_gru", "gru_aggregate"] if args.model == "both" else [args.model])
+    for which in want:
+        import torch  # noqa: F401  (imported late so --model none works without it)
         gcfg = load_config(args.gru_config)
-        hp = dict(gcfg.raw["model"], **gcfg.raw["optim"])
-        if args.epochs:
-            hp["epochs"] = args.epochs
         hs = ([float(x) for x in args.histories.split(",")] if args.histories
               else gcfg.raw["sweep"]["histories_s"])
-        print(f"GRU: selecting history from {hs} s on VAL (epochs={hp['epochs']}) ...")
-        t_in, scores = G.select_history(cfg, splits["train"], splits["val"], hs, hp)
-        print(f"  chosen t_in={t_in} frames ({t_in / cfg.fps:.1f} s); val MSE {scores}")
-        model, _, hist = G.train(cfg, splits["train"], splits["val"], t_in, hp, norm=norm)
-        preds = G.predict(model, cfg, norm, splits["test"], t_in)
-        R = EV.score_external(cfg, splits, "gru_aggregate", preds, results, norm)
-        rows += emit_rows(cfg, "gru_aggregate", R, results, tag)
-        results["gru_aggregate"] = R
-        print(f"  best val MSE {hist['best_val_mse']:.6f}")
+
+        if which == "gru_aggregate":
+            from src.opentouch import gru_aggregate as G
+            hp = dict(gcfg.raw["model"], **gcfg.raw["optim"])
+            if args.epochs:
+                hp["epochs"] = args.epochs
+            print(f"gru_aggregate: history sweep {hs} s on VAL (epochs={hp['epochs']}) ...")
+            t_in, scores = G.select_history(cfg, splits["train"], splits["val"], hs, hp)
+            print(f"  t_in={t_in} ({t_in / cfg.fps:.1f} s); val MSE {scores}")
+            model, _, hist = G.train(cfg, splits["train"], splits["val"], t_in, hp, norm=norm)
+            preds = G.predict(model, cfg, norm, splits["test"], t_in)
+            print(f"  best val MSE {hist['best_val_mse']:.6f}")
+        else:
+            # ActionSense's probGRU: its own hyperparameters (hidden 48 / 80 epochs), not
+            # gru_aggregate.yaml's -- those belong to the deterministic aggregate model.
+            from src.opentouch import prob_gru as P
+            hp = dict(P.DEFAULT_HP)
+            if args.epochs:
+                hp["epochs"] = args.epochs
+            print(f"prob_gru: history sweep {hs} s on VAL by NLL (epochs={hp['epochs']}) ...")
+            t_in, scores = P.select_history(cfg, splits["train"], splits["val"], hs, hp)
+            print(f"  t_in={t_in} ({t_in / cfg.fps:.1f} s); val NLL {scores}")
+            model, _, fnorm, vocab, by_idx, hist = P.train(
+                cfg, splits["train"], splits["val"], t_in, hp, norm=norm)
+            preds = P.predict(model, cfg, norm, fnorm, vocab, by_idx, splits["test"], t_in)
+            print(f"  best val NLL {hist['best_val_nll']:.6f} | "
+                  f"action vocab {hist['n_actions']} (incl. 'other')")
+
+        R = EV.score_external(cfg, splits, which, preds, results, norm)
+        rows += emit_rows(cfg, which, R, results, tag)
+        results[which] = R
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w", newline="") as f:

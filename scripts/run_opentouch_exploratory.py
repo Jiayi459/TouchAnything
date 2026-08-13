@@ -39,31 +39,53 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.actionsense.eval_harness.config import load_config          # noqa: E402
 from src.opentouch import evaluate as EV                             # noqa: E402
 from src.opentouch import metrics                                    # noqa: E402
-from src.opentouch.dataset import eligible_clips                     # noqa: E402
+from src.opentouch.dataset import (eligible_clips, group_keys,       # noqa: E402
+                                   missing_groups)
 
 
-def adhoc_split(clips, field, seed, frac=(0.6, 0.2, 0.2)):
+def adhoc_split(cfg, clips, field, seed, frac=(0.6, 0.2, 0.2)):
     """Hold out whole GROUPS, never individual clips.
 
     Clips from one scene share an environment, an object set and a participant's habits,
     so a random clip-level split would put near-duplicates on both sides and inflate every
     score. Grouping by `field` is the weakest defensible substitute for the real split
     while splits.py is blocked -- it is not equivalent to it.
+
+    A holdout unit is then MOVED BACK INTO TRAIN if it carries an AR fit group that TRAIN
+    would otherwise never see. dataset.missing_groups() documents why the caller has to do
+    this: AR fits per object_category, so a category living entirely inside a held-out
+    scene makes AR.predict raise KeyError deep in ar.py instead of failing here. Moving
+    the unit keeps the holdout at scene granularity (no clip-level leakage); it does bias
+    the split toward TRAIN, which is one more reason these numbers are exploratory.
     """
     by = collections.defaultdict(list)
     for r in clips:
         by[(r.get(field) or "unknown").strip()].append(r["idx"])
-    groups = sorted(by)
-    random.Random(seed).shuffle(groups)
+    units = sorted(by)
+    random.Random(seed).shuffle(units)
 
     n = sum(len(v) for v in by.values())
     want = [frac[0] * n, (frac[0] + frac[1]) * n]
-    out, acc = {"train": [], "val": [], "test": []}, 0
-    for g in groups:
-        bucket = "train" if acc < want[0] else ("val" if acc < want[1] else "test")
-        out[bucket] += by[g]
-        acc += len(by[g])
-    return {k: sorted(v) for k, v in out.items()}, len(groups)
+    assign, acc = {}, 0
+    for u in units:
+        assign[u] = "train" if acc < want[0] else ("val" if acc < want[1] else "test")
+        acc += len(by[u])
+
+    moved = []
+    while True:
+        tr = [i for u, b in assign.items() if b == "train" for i in by[u]]
+        gtr = set(group_keys(cfg, tr).values())
+        culprit = next((u for u, b in assign.items() if b != "train"
+                        and set(group_keys(cfg, by[u]).values()) - gtr), None)
+        if culprit is None:
+            break
+        moved.append(culprit)
+        assign[culprit] = "train"
+
+    out = collections.defaultdict(list)
+    for u, b in assign.items():
+        out[b] += by[u]
+    return {k: sorted(out[k]) for k in ("train", "val", "test")}, len(units), moved
 
 
 def emit_rows(cfg, model_name, R, ref_results, exploratory_tag):
@@ -109,12 +131,24 @@ def main():
     clips = eligible_clips(cfg)
     if args.max_clips and len(clips) > args.max_clips:
         clips = random.Random(args.seed).sample(clips, args.max_clips)
-    splits, n_groups = adhoc_split(clips, args.split_field, args.seed)
+    splits, n_units, moved = adhoc_split(cfg, clips, args.split_field, args.seed)
     tag = f"adhoc-{args.split_field}-seed{args.seed}"
-    print(f"eligible clips {len(clips)} | {args.split_field} groups {n_groups} | "
+    print(f"eligible clips {len(clips)} | {args.split_field} units {n_units} | "
           f"train {len(splits['train'])} val {len(splits['val'])} test {len(splits['test'])}")
+    if moved:
+        print(f"  moved into TRAIN to cover AR fit groups it would never have seen: {moved}")
     if min(len(v) for v in splits.values()) == 0:
-        raise SystemExit("a split came out empty -- too few groups; try --split-field shard")
+        raise SystemExit("a split came out empty -- too few holdout units; "
+                         "try --split-field shard, or a different --seed")
+
+    # The check dataset.missing_groups() exists for: AR fits per group and raises KeyError
+    # deep inside ar.py if asked to score one it never fit. Assert here, where the message
+    # can say what is wrong, rather than 20 minutes into a run.
+    gtr = group_keys(cfg, splits["train"])
+    for part in ("val", "test"):
+        miss = missing_groups(gtr, group_keys(cfg, splits[part]))
+        if miss:
+            raise SystemExit(f"{part} carries AR groups absent from train: {sorted(miss)}")
 
     print("fitting baselines (persistence / seasonal / ar) ...")
     results, norm, extras = EV.fit_and_forecast(cfg, splits)

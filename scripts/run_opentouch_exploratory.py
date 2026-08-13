@@ -1,0 +1,167 @@
+"""EXPLORATORY OpenTouch run: classical baselines + GRU-aggregate, whole corpus.
+
+NOT THE FROZEN PROTOCOL, AND ITS NUMBERS ARE NOT REPORTABLE. src/opentouch/splits.py does
+not exist (whether the "_p1"/"_p2" shard suffix is participant or session is unresolved),
+so evaluate.main() deliberately raises; this script supplies its own ad-hoc split instead.
+Every output file and every CSV row is tagged exploratory=True so a later reader cannot
+mistake it for a harness result.
+
+WHAT IT DOES NOT DO, ON PURPOSE
+  * No smooth/abrupt grouping. G2's trait classification is still being adjudicated (36
+    unaudited actions; OQ-L/OQ-M unsigned), and the design requires those verdicts to be
+    frozen BEFORE any per-class number is seen. Scoring the corpus as a whole cannot
+    contaminate them.
+  * No edit to configs/opentouch/eval_harness.yaml. config_hash is the hash of that file;
+    editing it to repoint states_root would silently break comparability with every run
+    that came before. Point the path with a symlink instead:
+        ln -s ~/opentouch/cache data/opentouch_states
+
+READ THE NUMBERS WITH THIS IN MIND: as of 2026-08-13 the raw pressure carries a large DC
+offset (F sits near 750k and moves by ~4%; CoP barely leaves the sensor centre), so a
+forecaster is mostly being asked to predict a constant. Persistence will look strong and
+R^2/skill will be flattering for reasons that have nothing to do with dynamics. That is
+the open D1 decision, not a result.
+
+    python scripts/run_opentouch_exploratory.py                    # baselines + GRU
+    python scripts/run_opentouch_exploratory.py --skip-gru         # baselines only, fast
+    python scripts/run_opentouch_exploratory.py --epochs 5 --max-clips 300   # smoke test
+"""
+from __future__ import annotations
+
+import argparse
+import collections
+import csv
+import os
+import random
+import sys
+
+import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.actionsense.eval_harness.config import load_config          # noqa: E402
+from src.opentouch import evaluate as EV                             # noqa: E402
+from src.opentouch import metrics                                    # noqa: E402
+from src.opentouch.dataset import Norm, eligible_clips, load_group   # noqa: E402
+
+
+def adhoc_split(clips, field, seed, frac=(0.6, 0.2, 0.2)):
+    """Hold out whole GROUPS, never individual clips.
+
+    Clips from one scene share an environment, an object set and a participant's habits,
+    so a random clip-level split would put near-duplicates on both sides and inflate every
+    score. Grouping by `field` is the weakest defensible substitute for the real split
+    while splits.py is blocked -- it is not equivalent to it.
+    """
+    by = collections.defaultdict(list)
+    for r in clips:
+        by[(r.get(field) or "unknown").strip()].append(r["idx"])
+    groups = sorted(by)
+    random.Random(seed).shuffle(groups)
+
+    n = sum(len(v) for v in by.values())
+    want = [frac[0] * n, (frac[0] + frac[1]) * n]
+    out, acc = {"train": [], "val": [], "test": []}, 0
+    for g in groups:
+        bucket = "train" if acc < want[0] else ("val" if acc < want[1] else "test")
+        out[bucket] += by[g]
+        acc += len(by[g])
+    return {k: sorted(v) for k, v in out.items()}, len(groups)
+
+
+def emit_rows(cfg, model_name, R, ref_results, exploratory_tag):
+    rows, H, chans = [], cfg.horizon, cfg.channels
+    for ci, ch in enumerate(chans):
+        n = R["n"][ci]
+        for h in range(H):
+            for metric, val in (("MSE", R["hz_mse"][h, ci]), ("MAE", R["hz_mae"][h, ci])):
+                rows.append((model_name, ch, h + 1, metric, float(val), int(n)))
+            for b, RB in ref_results.items():
+                rows.append((model_name, ch, h + 1, f"SS_vs_{b}",
+                             float(metrics.skill(R["hz_mse"][h, ci], RB["hz_mse"][h, ci])),
+                             int(n)))
+        for metric, val in (("MSE", R["ch_mse"][ci]), ("MAE", R["ch_mae"][ci])):
+            rows.append((model_name, ch, "all", metric, float(val), int(n)))
+        for b, RB in ref_results.items():
+            rows.append((model_name, ch, "all", f"SS_vs_{b}",
+                         float(metrics.skill(R["ch_mse"][ci], RB["ch_mse"][ci])), int(n)))
+    return [dict(zip(("model", "channel", "horizon_step", "metric", "value", "n_frames"), r),
+                 config_hash=cfg.config_hash, exploratory=True, split=exploratory_tag)
+            for r in rows]
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--config", default="configs/opentouch/eval_harness.yaml")
+    ap.add_argument("--gru-config", default="configs/opentouch/gru_aggregate.yaml")
+    ap.add_argument("--split-field", default="scene",
+                    help="manifest field held out as a whole (scene/shard/environment)")
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--epochs", type=int, help="override the GRU epochs (smoke runs)")
+    ap.add_argument("--histories", help="override the history sweep, e.g. 1,2,3 (seconds)")
+    ap.add_argument("--max-clips", type=int, help="subsample the corpus (smoke runs)")
+    ap.add_argument("--skip-gru", action="store_true")
+    ap.add_argument("--out", default="docs/exploratory_opentouch.csv")
+    args = ap.parse_args()
+
+    cfg = load_config(args.config)
+    clips = eligible_clips(cfg)
+    if args.max_clips and len(clips) > args.max_clips:
+        clips = random.Random(args.seed).sample(clips, args.max_clips)
+    splits, n_groups = adhoc_split(clips, args.split_field, args.seed)
+    tag = f"adhoc-{args.split_field}-seed{args.seed}"
+    print(f"eligible clips {len(clips)} | {args.split_field} groups {n_groups} | "
+          f"train {len(splits['train'])} val {len(splits['val'])} test {len(splits['test'])}")
+    if min(len(v) for v in splits.values()) == 0:
+        raise SystemExit("a split came out empty -- too few groups; try --split-field shard")
+
+    print("fitting baselines (persistence / seasonal / ar) ...")
+    results, norm, extras = EV.fit_and_forecast(cfg, splits)
+    rows = []
+    for m in EV.MODELS:
+        rows += emit_rows(cfg, m, results[m], results, tag)
+
+    if not args.skip_gru:
+        import torch  # noqa: F401  (imported late so --skip-gru works without it)
+        from src.opentouch import gru_aggregate as G
+        gcfg = load_config(args.gru_config)
+        hp = dict(gcfg.raw["model"], **gcfg.raw["optim"])
+        if args.epochs:
+            hp["epochs"] = args.epochs
+        hs = ([float(x) for x in args.histories.split(",")] if args.histories
+              else gcfg.raw["sweep"]["histories_s"])
+        print(f"GRU: selecting history from {hs} s on VAL (epochs={hp['epochs']}) ...")
+        t_in, scores = G.select_history(cfg, splits["train"], splits["val"], hs, hp)
+        print(f"  chosen t_in={t_in} frames ({t_in / cfg.fps:.1f} s); val MSE {scores}")
+        model, _, hist = G.train(cfg, splits["train"], splits["val"], t_in, hp, norm=norm)
+        preds = G.predict(model, cfg, norm, splits["test"], t_in)
+        R = EV.score_external(cfg, splits, "gru_aggregate", preds, results, norm)
+        rows += emit_rows(cfg, "gru_aggregate", R, results, tag)
+        results["gru_aggregate"] = R
+        print(f"  best val MSE {hist['best_val_mse']:.6f}")
+
+    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+    with open(args.out, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0]))
+        w.writeheader(); w.writerows(rows)
+    print(f"\nwrote {args.out}  ({len(rows)} rows)")
+
+    print(f"\n=== full-horizon per-channel MSE (EXPLORATORY, split={tag}) ===")
+    print(f"{'model':16s} " + " ".join(f"{c:>12s}" for c in cfg.channels))
+    for m, R in results.items():
+        print(f"{m:16s} " + " ".join(f"{R['ch_mse'][ci]:12.5f}"
+                                     for ci in range(len(cfg.channels))))
+    print(f"\n=== skill vs persistence (>0 is better; EXPLORATORY) ===")
+    print(f"{'model':16s} " + " ".join(f"{c:>12s}" for c in cfg.channels))
+    for m, R in results.items():
+        if m == "persistence":
+            continue
+        print(f"{m:16s} " + " ".join(
+            f"{metrics.skill(R['ch_mse'][ci], results['persistence']['ch_mse'][ci]):12.4f}"
+            for ci in range(len(cfg.channels))))
+    print("\nEXPLORATORY: ad-hoc split, not the frozen protocol; not reportable. "
+          "F is DC-dominated (D1 unresolved), so these favour persistence for reasons "
+          "unrelated to dynamics.")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

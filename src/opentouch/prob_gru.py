@@ -44,6 +44,7 @@ to merge rare object categories, so the two arms treat rarity the same way.
 from __future__ import annotations
 
 import collections
+import time
 
 import numpy as np
 import torch
@@ -178,8 +179,12 @@ def _val_nll(m, X, A, YL, Y, H, batch) -> float:
 
 # ---------------------------------------------------------------------------- training --
 def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
-          hp: dict | None = None, norm: Norm | None = None):
+          hp: dict | None = None, norm: Norm | None = None, verbose: bool = True):
     """Fit on TRAIN, keep the lowest-VAL-NLL weights. TEST is never touched.
+
+    `verbose` prints the window count up front and one line per epoch, flushed. The
+    autoregressive decoder runs `horizon` sequential GRU steps per batch, so a CPU run is
+    slow enough that a silent loop is indistinguishable from a hung one.
 
     -> (model, norm, fnorm, vocab, by_idx, history)"""
     hp = {**DEFAULT_HP, **(hp or {})}
@@ -195,10 +200,15 @@ def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
         raise ValueError("no TRAIN origins: clips too short for this history/horizon")
 
     H, bs = cfg.horizon, int(hp["batch"])
+    n_ep = int(hp["epochs"])
+    if verbose:
+        print(f"    [t_in={t_in}] windows: train {len(Xtr)} val {len(Xva)} | "
+              f"batches/epoch {-(-len(Xtr) // bs)} | vocab {len(vocab)}", flush=True)
     m = ProbGRU(Xtr.shape[-1], len(vocab), int(hp["hidden"]), n_out=len(cfg.channels))
     opt = torch.optim.Adam(m.parameters(), lr=hp["lr"])
     best, best_state, history = np.inf, None, {"train_nll": [], "val_nll": []}
-    for _ in range(int(hp["epochs"])):
+    t0 = time.time()
+    for ep in range(n_ep):
         m.train()
         perm = torch.randperm(len(Xtr), generator=gen)
         for i in range(0, len(Xtr), bs):
@@ -209,7 +219,13 @@ def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
         tr = _val_nll(m, Xtr, Atr, Ltr, Ytr, H, bs)
         va = _val_nll(m, Xva, Ava, Lva, Yva, H, bs) if len(Xva) else tr
         history["train_nll"].append(tr); history["val_nll"].append(va)
-        if va < best:
+        improved = va < best
+        if verbose:
+            el = time.time() - t0
+            print(f"    [t_in={t_in}] epoch {ep + 1}/{n_ep} train {tr:.5f} val {va:.5f}"
+                  f"{'  *best' if improved else ''} | {el:.0f}s elapsed, "
+                  f"~{el / (ep + 1) * (n_ep - ep - 1):.0f}s left", flush=True)
+        if improved:
             best, best_state = va, {k: v.detach().clone() for k, v in m.state_dict().items()}
     if best_state is not None:
         m.load_state_dict(best_state)
@@ -226,6 +242,7 @@ def select_history(cfg: Config, train_ids: list[int], val_ids: list[int],
     scores = {}
     for s in histories_s:
         t_in = max(1, int(round(s * cfg.fps)))
+        print(f"  sweep: history {s} s -> t_in={t_in} frames", flush=True)
         *_, hist = train(cfg, train_ids, val_ids, t_in, hp)
         scores[t_in] = hist["best_val_nll"]
     return min(scores, key=scores.get), scores

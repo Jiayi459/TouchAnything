@@ -1,0 +1,63 @@
+#!/bin/bash
+# UGE job: the EXPLORATORY OpenTouch run (baselines + probGRU) on a CRC GPU node.
+#
+# WHY A GPU AT ALL. The decoder is autoregressive over the 30-step horizon, so one batch is
+# 30 sequential GRU steps; on the front-end CPU the full sweep (80 epochs x 3 histories over
+# ~156k windows) was measured at roughly 7-9 hours (2026-08-13 smoke: 300 clips, 16k windows,
+# 7 s/epoch at t_in=30). That is both too slow to iterate on and heavier than a login node
+# should carry.
+#
+# WHAT IT PRODUCES IS EXPLORATORY, NOT REPORTABLE: splits.py does not exist, so the driver
+# makes an ad-hoc scene-level split, and F is still DC-dominated (D1 open). Every CSV row is
+# tagged exploratory=True. See SESSION_LOG 2026-08-13.
+#
+# Prerequisites (once):
+#   ln -sfn ~/opentouch/cache ~/TouchAnything/data/opentouch_states
+#   mkdir -p ~/TouchAnything/logs
+# Submit from the repo root:
+#   qsub scripts/crc/opentouch_probgru_gpu.job
+#   qsub -v EPOCHS=20,MODEL=both scripts/crc/opentouch_probgru_gpu.job
+#   qsub -v MAX_CLIPS=300,EPOCHS=2 scripts/crc/opentouch_probgru_gpu.job     # smoke
+# Watch it:
+#   qstat -u $USER ; tail -f logs/opentouch_probgru.o<JOB_ID>
+# NOTE: no inline comments on #$ lines.
+#$ -M jhao3@nd.edu
+#$ -m abe
+#$ -q gpu
+#$ -l gpu_card=1
+#$ -pe smp 4
+#$ -N opentouch_probgru
+#$ -cwd
+#$ -o logs/
+#$ -e logs/
+
+set -euo pipefail
+conda activate tactile
+
+echo "Host: $(hostname)  JOB_ID: ${JOB_ID:-NA}  started $(date)"
+python -c "import torch; print('torch', torch.__version__, '| cuda', torch.cuda.is_available(),
+      '|', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU only')"
+
+# Fail loudly here rather than deep in the run: the cache is reached through this symlink,
+# and a job that silently trains on nothing wastes the whole GPU slot.
+test -f data/opentouch_states/manifest.jsonl || {
+    echo "FATAL: data/opentouch_states/manifest.jsonl missing."
+    echo "  ln -sfn ~/opentouch/cache ~/TouchAnything/data/opentouch_states"
+    exit 1
+}
+
+# The torch-dependent tests only ever execute where torch works, i.e. here. Running them
+# first means a broken fork fails in seconds instead of after hours of training.
+python -c "import pytest" 2>/dev/null || pip install pytest --quiet
+python -m pytest tests/test_opentouch_prob_gru.py tests/test_opentouch_gru_aggregate.py -q
+
+python -u scripts/run_opentouch_exploratory.py \
+    --model "${MODEL:-prob_gru}" \
+    --split-field "${SPLIT_FIELD:-scene}" \
+    --seed "${SEED:-0}" \
+    ${EPOCHS:+--epochs "$EPOCHS"} \
+    ${HISTORIES:+--histories "$HISTORIES"} \
+    ${MAX_CLIPS:+--max-clips "$MAX_CLIPS"} \
+    --out "${OUT:-docs/exploratory_opentouch.csv}"
+
+echo "finished $(date)"

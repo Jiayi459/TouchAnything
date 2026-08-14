@@ -124,6 +124,7 @@ def main():
                     help="prob_gru = the ActionSense probabilistic GRU (architecture and "
                          "Gaussian NLL verbatim); gru_aggregate = the deterministic arm")
     ap.add_argument("--skip-gru", action="store_true", help="alias for --model none")
+    ap.add_argument("--device", help="torch device for prob_gru (default: cuda if present)")
     ap.add_argument("--out", default="docs/exploratory_opentouch.csv")
     args = ap.parse_args()
 
@@ -183,10 +184,11 @@ def main():
             if args.epochs:
                 hp["epochs"] = args.epochs
             print(f"prob_gru: history sweep {hs} s on VAL by NLL (epochs={hp['epochs']}) ...")
-            t_in, scores = P.select_history(cfg, splits["train"], splits["val"], hs, hp)
+            t_in, scores = P.select_history(cfg, splits["train"], splits["val"], hs, hp,
+                                            device=args.device)
             print(f"  t_in={t_in} ({t_in / cfg.fps:.1f} s); val NLL {scores}")
             model, _, fnorm, vocab, by_idx, hist = P.train(
-                cfg, splits["train"], splits["val"], t_in, hp, norm=norm)
+                cfg, splits["train"], splits["val"], t_in, hp, norm=norm, device=args.device)
             preds = P.predict(model, cfg, norm, fnorm, vocab, by_idx, splits["test"], t_in)
             print(f"  best val NLL {hist['best_val_nll']:.6f} | "
                   f"action vocab {hist['n_actions']} (incl. 'other')")

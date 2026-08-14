@@ -59,6 +59,16 @@ DEFAULT_HP = {"hidden": 48, "epochs": 80, "lr": 0.003, "batch": 64, "seed": 0}
 OTHER = 0          # reserved embedding id: rare-in-TRAIN or unseen-at-TEST actions
 
 
+def pick_device(spec: str | None = None) -> torch.device:
+    """'cuda' when a GPU is actually present, else CPU. Note the determinism caveat that
+    gru_aggregate.configure_determinism documents: cuDNN's RNN kernels are not guaranteed
+    deterministic even under deterministic algorithms, so a CUDA run cannot claim bitwise
+    reproducibility the way a CPU run can -- it must record that it ran on GPU."""
+    if spec:
+        return torch.device(spec)
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 # ------------------------------------------------------------------------------- data --
 def causal_velocity(sig: np.ndarray, fps: float) -> np.ndarray:
     """v[t] = (sig[t] - sig[t-1]) * fps, v[0] = 0 -- ActionSense's _causal_diff. Backward,
@@ -168,18 +178,20 @@ def nll(mu: torch.Tensor, lv: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
 
 
 @torch.no_grad()
-def _val_nll(m, X, A, YL, Y, H, batch) -> float:
+def _val_nll(m, X, A, YL, Y, H, batch, dev) -> float:
     m.eval()
     tot = n = 0.0
     for i in range(0, len(X), batch):
-        mu, lv = m(X[i:i + batch], A[i:i + batch], YL[i:i + batch], H)
-        tot += float(nll(mu, lv, Y[i:i + batch])) * len(mu); n += len(mu)
+        mu, lv = m(X[i:i + batch].to(dev), A[i:i + batch].to(dev),
+                   YL[i:i + batch].to(dev), H)
+        tot += float(nll(mu, lv, Y[i:i + batch].to(dev))) * len(mu); n += len(mu)
     return tot / max(n, 1.0)
 
 
 # ---------------------------------------------------------------------------- training --
 def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
-          hp: dict | None = None, norm: Norm | None = None, verbose: bool = True):
+          hp: dict | None = None, norm: Norm | None = None, verbose: bool = True,
+          device: str | None = None):
     """Fit on TRAIN, keep the lowest-VAL-NLL weights. TEST is never touched.
 
     `verbose` prints the window count up front and one line per epoch, flushed. The
@@ -201,10 +213,12 @@ def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
 
     H, bs = cfg.horizon, int(hp["batch"])
     n_ep = int(hp["epochs"])
+    dev = pick_device(device)
     if verbose:
         print(f"    [t_in={t_in}] windows: train {len(Xtr)} val {len(Xva)} | "
-              f"batches/epoch {-(-len(Xtr) // bs)} | vocab {len(vocab)}", flush=True)
-    m = ProbGRU(Xtr.shape[-1], len(vocab), int(hp["hidden"]), n_out=len(cfg.channels))
+              f"batches/epoch {-(-len(Xtr) // bs)} | vocab {len(vocab)} | device {dev}",
+              flush=True)
+    m = ProbGRU(Xtr.shape[-1], len(vocab), int(hp["hidden"]), n_out=len(cfg.channels)).to(dev)
     opt = torch.optim.Adam(m.parameters(), lr=hp["lr"])
     best, best_state, history = np.inf, None, {"train_nll": [], "val_nll": []}
     t0 = time.time()
@@ -213,11 +227,11 @@ def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
         perm = torch.randperm(len(Xtr), generator=gen)
         for i in range(0, len(Xtr), bs):
             b = perm[i:i + bs]
-            mu, lv = m(Xtr[b], Atr[b], Ltr[b], H)
-            loss = nll(mu, lv, Ytr[b])
+            mu, lv = m(Xtr[b].to(dev), Atr[b].to(dev), Ltr[b].to(dev), H)
+            loss = nll(mu, lv, Ytr[b].to(dev))
             opt.zero_grad(); loss.backward(); opt.step()
-        tr = _val_nll(m, Xtr, Atr, Ltr, Ytr, H, bs)
-        va = _val_nll(m, Xva, Ava, Lva, Yva, H, bs) if len(Xva) else tr
+        tr = _val_nll(m, Xtr, Atr, Ltr, Ytr, H, bs, dev)
+        va = _val_nll(m, Xva, Ava, Lva, Yva, H, bs, dev) if len(Xva) else tr
         history["train_nll"].append(tr); history["val_nll"].append(va)
         improved = va < best
         if verbose:
@@ -233,17 +247,19 @@ def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
     history["best_val_nll"] = float(best)
     history["selected_on"] = "val" if len(Xva) else "train"
     history["n_actions"] = len(vocab)
+    history["device"] = str(dev)
     return m, norm, fnorm, vocab, by_idx, history
 
 
 def select_history(cfg: Config, train_ids: list[int], val_ids: list[int],
-                   histories_s=(1.0, 2.0, 3.0), hp: dict | None = None):
+                   histories_s=(1.0, 2.0, 3.0), hp: dict | None = None,
+                   device: str | None = None):
     """Input history chosen on VAL only, by NLL. -> (best_t_in, {t_in: best_val_nll})."""
     scores = {}
     for s in histories_s:
         t_in = max(1, int(round(s * cfg.fps)))
         print(f"  sweep: history {s} s -> t_in={t_in} frames", flush=True)
-        *_, hist = train(cfg, train_ids, val_ids, t_in, hp)
+        *_, hist = train(cfg, train_ids, val_ids, t_in, hp, device=device)
         scores[t_in] = hist["best_val_nll"]
     return min(scores, key=scores.get), scores
 
@@ -259,8 +275,9 @@ def predict_clip(model, cfg: Config, norm: Norm, fnorm: FeatNorm, vocab, by_idx,
     X, A, L, _ = window_set(cfg, [i], t_in, norm, fnorm, vocab, by_idx)
     if len(X) == 0:
         return np.zeros((0, cfg.horizon, len(cfg.channels)), dtype=np.float64)
-    mu, _ = model(X, A, L, cfg.horizon)
-    return norm.unz(mu.numpy().astype(np.float64))
+    dev = next(model.parameters()).device
+    mu, _ = model(X.to(dev), A.to(dev), L.to(dev), cfg.horizon)
+    return norm.unz(mu.cpu().numpy().astype(np.float64))
 
 
 def predict(model, cfg: Config, norm: Norm, fnorm: FeatNorm, vocab, by_idx,

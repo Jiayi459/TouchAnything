@@ -148,3 +148,55 @@ def test_too_few_locations_is_an_error(tmp_path):
     cfg = make_cfg(tmp_path, [("a", "cup", 10), ("b", "box", 10)], min_group_size=5)
     with pytest.raises(ValueError, match="locations"):
         S.build(cfg, seed=0)
+
+
+def _plan_12_locations():
+    """Twelve locations with the real corpus's lumpiness: one 5-shard place, three
+    3-shard, four 2-shard, four singletons."""
+    sizes = [("big", 5), ("mid1", 3), ("mid2", 3), ("mid3", 3),
+             ("pair1", 2), ("pair2", 2), ("pair3", 2), ("pair4", 2),
+             ("one1", 1), ("one2", 1), ("one3", 1), ("one4", 1)]
+    plan = []
+    for n, (loc, parts) in enumerate(sizes):
+        for k in range(1, parts + 1):
+            plan.append((f"{loc}_p{k}" if parts > 1 else loc, f"cat{n % 5}", 10))
+    return plan
+
+
+def test_every_location_is_test_exactly_once(tmp_path):
+    cfg = make_cfg(tmp_path, _plan_12_locations(), min_group_size=5)
+    fs = S.folds(cfg, k=4, seed=0)
+    assert len(fs) == 4
+    seen = [u for f in fs for u in f["locations"]["test"]]
+    assert sorted(seen) == sorted(S.by_location(
+        [json.loads(l) for l in open(tmp_path / "manifest.jsonl")]))
+    assert len(seen) == len(set(seen)), "a location was TEST in two folds"
+
+
+def test_no_fold_shares_a_location_between_train_and_test(tmp_path):
+    cfg = make_cfg(tmp_path, _plan_12_locations(), min_group_size=5)
+    for f in S.folds(cfg, k=4, seed=1):
+        assert not set(f["locations"]["train"]) & set(f["locations"]["test"])
+        assert not set(f["locations"]["train"]) & set(f["locations"]["val"])
+        assert not set(f["locations"]["val"]) & set(f["locations"]["test"])
+        assert not set(f["train"]) & set(f["test"])
+
+
+def test_folds_are_balanced_enough_to_compare(tmp_path):
+    """Blocks are built largest-first into the emptiest block; with one 5x location the
+    test sizes should still land within a factor of ~2 of each other."""
+    cfg = make_cfg(tmp_path, _plan_12_locations(), min_group_size=5)
+    fs = S.folds(cfg, k=4, seed=0)
+    sizes = sorted(len(f["test"]) for f in fs)
+    assert sizes[0] > 0 and sizes[-1] / sizes[0] <= 2.5
+
+
+def test_folds_are_deterministic(tmp_path):
+    cfg = make_cfg(tmp_path, _plan_12_locations(), min_group_size=5)
+    assert S.folds(cfg, 4, seed=2) == S.folds(cfg, 4, seed=2)
+
+
+def test_k_below_three_is_rejected(tmp_path):
+    cfg = make_cfg(tmp_path, _plan_12_locations(), min_group_size=5)
+    with pytest.raises(ValueError, match="k must be"):
+        S.folds(cfg, k=2)

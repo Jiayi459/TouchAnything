@@ -110,6 +110,75 @@ def build(cfg: Config, frac=(0.6, 0.2, 0.2), seed: int = 0) -> dict:
             "seed": seed, "frac": list(frac), "unit": "location"}
 
 
+def blocks(units: dict[str, list[int]], k: int, seed: int) -> list[list[str]]:
+    """Partition the locations into k blocks of roughly equal clip count.
+
+    Same greedy rule as assign(): largest unit first into the emptiest block, with the
+    seed only breaking ties among equal-sized units. With 12 lumpy locations this is the
+    difference between blocks of (100, 20, 20, 20) and something usable.
+    """
+    order = list(units)
+    random.Random(seed).shuffle(order)
+    order.sort(key=lambda u: -len(units[u]))
+    out: list[list[str]] = [[] for _ in range(k)]
+    have = [0] * k
+    for u in order:
+        b = min(range(k), key=lambda j: have[j])
+        out[b].append(u)
+        have[b] += len(units[u])
+    return [sorted(b) for b in out]
+
+
+def folds(cfg: Config, k: int = 4, seed: int = 0) -> list[dict]:
+    """k grouped folds over LOCATIONS -- every location is TEST exactly once.
+
+    A single 60/20/20 split of 12 lumpy locations leaves TEST holding 2-3 places, so the
+    number you report depends heavily on WHICH places were drawn: eat_mcdonalds (one
+    cramped setting, few actions) and hardware_homedepot (five shards, wide action range)
+    are not interchangeable. Rotating every location through TEST replaces that lottery
+    with a spread you can report, and the spread across folds is itself the answer to
+    "would this hold on other environments?".
+
+    Fold i: TEST = block i, VAL = block (i+1) % k, TRAIN = the rest. Each location is thus
+    TEST once and VAL once, and no fold shares a location between its own train and test.
+    """
+    if k < 3:
+        raise ValueError("k must be >= 3 so a fold has train, val and test")
+    clips = eligible_clips(cfg)
+    units = by_location(clips)
+    if len(units) < k:
+        raise ValueError(f"{len(units)} locations cannot make {k} folds")
+    bl = blocks(units, k, seed)
+
+    out = []
+    for i in range(k):
+        loc = {"test": bl[i], "val": bl[(i + 1) % k],
+               "train": sorted(u for j in range(k) if j not in (i, (i + 1) % k)
+                               for u in bl[j])}
+        ids = {b: sorted(x for u in loc[b] for x in units[u]) for b in loc}
+        if min(len(v) for v in ids.values()) == 0:
+            raise ValueError(f"fold {i} has an empty part at k={k}, seed={seed}")
+        gtr = group_keys(cfg, ids["train"], ids["train"])
+        for part in ("val", "test"):
+            miss = missing_groups(gtr, group_keys(cfg, ids[part], ids["train"]))
+            if miss:
+                raise ValueError(f"fold {i} {part} needs AR groups TRAIN never fits: "
+                                 f"{sorted(miss)}; try another --seed")
+        out.append({**ids, "locations": loc, "fold": i, "k": k, "seed": seed,
+                    "unit": "location"})
+    return out
+
+
+def summarize_folds(cfg: Config, fs: list[dict]) -> str:
+    lines = [f"unit=location  k={fs[0]['k']}  seed={fs[0]['seed']}"]
+    for f in fs:
+        n = {b: len(f[b]) for b in ("train", "val", "test")}
+        lines.append(f"  fold {f['fold']}: train {n['train']:5d} val {n['val']:5d} "
+                     f"test {n['test']:5d} | test locations: "
+                     + ", ".join(f["locations"]["test"]))
+    return "\n".join(lines)
+
+
 def save(cfg: Config, splits: dict, path: str | None = None) -> str:
     path = path or cfg.abspath("split_file")
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -142,9 +211,21 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--frac", default="0.6,0.2,0.2")
     ap.add_argument("--out", help="default: paths.split_file from the config")
+    ap.add_argument("--folds", type=int, help="write k grouped folds instead of one split")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     cfg = load_config(a.config)
+    if a.folds:
+        fs = folds(cfg, a.folds, a.seed)
+        print(summarize_folds(cfg, fs))
+        if not a.dry_run:
+            path = a.out or os.path.join(os.path.dirname(cfg.abspath("split_file")),
+                                         f"folds_k{a.folds}.json")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                json.dump(fs, f, indent=2)
+            print("wrote", path)
+        return 0
     sp = build(cfg, tuple(float(x) for x in a.frac.split(",")), a.seed)
     print(summarize(cfg, sp))
     if not a.dry_run:

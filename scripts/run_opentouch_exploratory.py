@@ -128,10 +128,17 @@ def main():
                          "Gaussian NLL verbatim); gru_aggregate = the deterministic arm")
     ap.add_argument("--skip-gru", action="store_true", help="alias for --model none")
     ap.add_argument("--device", help="torch device for prob_gru (default: cuda if present)")
+    ap.add_argument("--folds", type=int,
+                    help="run k grouped folds (every location held out once) instead of "
+                         "a single split; location mode only")
     ap.add_argument("--out", default="docs/exploratory_opentouch.csv")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
+    if args.folds:
+        if args.split_mode != "location":
+            raise SystemExit("--folds requires --split-mode location")
+        return run_folds(cfg, args)
     clips = eligible_clips(cfg)
     if args.max_clips and len(clips) > args.max_clips:
         clips = random.Random(args.seed).sample(clips, args.max_clips)
@@ -157,6 +164,61 @@ def main():
     # The check dataset.missing_groups() exists for: AR fits per group and raises KeyError
     # deep inside ar.py if asked to score one it never fit. splits.build() already asserts
     # it; repeated here because --split-mode adhoc does not go through it.
+    check_groups(cfg, splits)
+    rows, results = run_split(cfg, splits, args, tag)
+    write_and_report(cfg, rows, results, args.out, tag)
+    return 0
+
+
+def run_folds(cfg, args):
+    """k grouped folds, every location held out once. Reports the spread across folds,
+    which is the point: with 12 lumpy locations a single split's TEST is 2-3 places, and
+    'would this hold on other environments' is answerable only by rotating them."""
+    from src.opentouch import splits as SP
+    fs = SP.folds(cfg, args.folds, args.seed)
+    print(SP.summarize_folds(cfg, fs))
+
+    all_rows, per_fold = [], []
+    for f in fs:
+        print(f"\n########## fold {f['fold']}/{args.folds - 1}  "
+              f"test = {', '.join(f['locations']['test'])} ##########")
+        check_groups(cfg, f)
+        tag = f"location-k{args.folds}-fold{f['fold']}-seed{args.seed}"
+        rows, results = run_split(cfg, f, args, tag)
+        for r in rows:
+            r["fold"] = f["fold"]
+        all_rows += rows
+        per_fold.append(results)
+
+    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+    with open(args.out, "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(all_rows[0]))
+        w.writeheader(); w.writerows(all_rows)
+    print(f"\nwrote {args.out}  ({len(all_rows)} rows, {args.folds} folds)")
+
+    models = [m for m in per_fold[0]]
+    print(f"\n=== skill vs persistence across {args.folds} folds "
+          f"(mean [min, max]; EXPLORATORY) ===")
+    print(f"{'model':16s} " + " ".join(f"{c:>22s}" for c in cfg.channels))
+    for m in models:
+        if m == "persistence":
+            continue
+        cells = []
+        for ci in range(len(cfg.channels)):
+            v = [metrics.skill(R[m]["ch_mse"][ci], R["persistence"]["ch_mse"][ci])
+                 for R in per_fold]
+            cells.append(f"{sum(v) / len(v):8.4f} [{min(v):6.3f},{max(v):6.3f}]")
+        print(f"{m:16s} " + " ".join(cells))
+    print("\nRead the spread, not just the mean: a model that wins on three locations and "
+          "loses on the fourth has not been shown to generalize across environments.\n"
+          "EXPLORATORY: F is DC-dominated (D1 unresolved).")
+    return 0
+
+
+def check_groups(cfg, splits):
+    """AR fits per group and raises KeyError deep in ar.py if asked to score one it never
+    fit. splits.build()/folds() already assert this; repeated because --split-mode adhoc
+    does not go through them."""
     tr = splits["train"]
     gtr = group_keys(cfg, tr, tr)
     for part in ("val", "test"):
@@ -164,6 +226,8 @@ def main():
         if miss:
             raise SystemExit(f"{part} carries AR groups absent from train: {sorted(miss)}")
 
+
+def run_split(cfg, splits, args, tag):
     print("fitting baselines (persistence / seasonal / ar) ...")
     results, norm, extras = EV.fit_and_forecast(cfg, splits)
     rows = []
@@ -209,12 +273,15 @@ def main():
         R = EV.score_external(cfg, splits, which, preds, results, norm)
         rows += emit_rows(cfg, which, R, results, tag)
         results[which] = R
+    return rows, results
 
-    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-    with open(args.out, "w", newline="") as f:
+
+def write_and_report(cfg, rows, results, out, tag):
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    with open(out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader(); w.writerows(rows)
-    print(f"\nwrote {args.out}  ({len(rows)} rows)")
+    print(f"\nwrote {out}  ({len(rows)} rows)")
 
     print(f"\n=== full-horizon per-channel MSE (EXPLORATORY, split={tag}) ===")
     print(f"{'model':16s} " + " ".join(f"{c:>12s}" for c in cfg.channels))

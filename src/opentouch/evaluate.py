@@ -26,6 +26,7 @@ import os
 import numpy as np
 import pandas as pd
 
+from . import aggregate
 from . import baselines as BL
 from . import masking, metrics
 from .dataset import Norm, force_thresholds, group_keys, load_group
@@ -128,6 +129,76 @@ def score_external(cfg: Config, splits: dict, name: str, preds: dict[int, np.nda
     ytrue, yhat = np.stack(yts), np.stack(yhs)
     mask = masking.valid_mask(cfg, ytrue.reshape(-1, C), thr).reshape(ytrue.shape)
     return _result(ytrue, yhat, mask)
+
+
+def collect_clip_stats(cfg: Config, splits: dict, external: dict | None = None):
+    """Fit every model ONCE on the whole TRAIN, forecast TEST, collapse to per-clip stats.
+
+    This is the shape G2 takes after the user's 2026-08-15 ruling: train on everything,
+    separate only when scoring. Fitting AR per trait class -- what the 2026-08-11 plan said
+    -- would hand it a per-class specialisation the GRU never gets, and the comparison would
+    measure that instead of the trait.
+
+    `external` carries a GRU arm as {name: {clip_idx: (n_origins,H,C)}}, exactly what
+    prob_gru.predict returns. -> (ClipStats, norm); the row selection for a class comes from
+    trait_rows() below, and aggregate.r2(..., rows=...) does the scoring.
+    """
+    train, val, test = (load_group(cfg, splits[k]) for k in ("train", "val", "test"))
+    tr_ids = splits["train"]
+    gtr = group_keys(cfg, tr_ids, tr_ids)
+    gva = group_keys(cfg, splits["val"], tr_ids)
+    gte = group_keys(cfg, splits["test"], tr_ids)
+    norm = Norm.from_train(train)
+    thr = force_thresholds(cfg, train)
+    C = len(cfg.channels)
+
+    preds, ytrue, clip_ids = {}, None, None
+    for name in MODELS:
+        bl = CLASSES[name](cfg, norm)
+        bl.fit(train, gtr)
+        bl.select(val, gva, cfg.horizon)
+        yt, yh, ids = BL.predict_series_by_clip(bl, test, gte, cfg)
+        ytrue, clip_ids = yt, ids
+        preds[name] = yh
+
+    for name, per_clip in (external or {}).items():
+        chunks = []
+        for i, Y in sorted(test.items()):
+            n_or = len(BL.origins(len(Y), cfg))
+            if i not in per_clip or per_clip[i].shape != (n_or, cfg.horizon, C):
+                raise ValueError(f"{name} preds[{i}] must be ({n_or}, {cfg.horizon}, {C})")
+            chunks.append(per_clip[i])
+        preds[name] = np.concatenate(chunks, 0) if chunks else np.zeros_like(ytrue)
+
+    mask = masking.valid_mask(cfg, ytrue.reshape(-1, C), thr).reshape(ytrue.shape)
+    return aggregate.clip_stats(ytrue, mask, clip_ids, preds, cfg.channels), norm
+
+
+def trait_rows(cfg: Config, st, allow_unaudited: bool = False) -> dict[str, np.ndarray]:
+    """Bucket -> row indices into st.clip_ids, for aggregate.r2(..., rows=...).
+
+    trait.partition buckets into smooth / abrupt / unlabeled / unaudited rather than
+    raising (only trait_class raises). An "unaudited" clip is one whose action was never
+    ruled on against the rubric -- 36 such actions covering 278 clips were found on
+    2026-08-13 -- and scoring while any remain would mean the class definition could still
+    change after the numbers were seen, which is the post-hoc the design exists to prevent.
+    So a non-empty unaudited bucket is refused here rather than quietly dropped;
+    allow_unaudited=True is for tests and diagnostics, never for a reported number.
+    """
+    from . import trait
+    from .dataset import eligible_clips
+
+    action = {r["idx"]: r.get("action", "") for r in eligible_clips(cfg, actions=())}
+    part = trait.partition({int(i): action.get(int(i), "") for i in st.clip_ids})
+    if part.get("unaudited") and not allow_unaudited:
+        bad = sorted({action.get(int(i), "") for i in part["unaudited"]})
+        raise trait.UnauditedAction(
+            f"{len(part['unaudited'])} TEST clips carry actions never audited against the "
+            f"rubric: {bad}. Rule on them in src/opentouch/trait.py BEFORE scoring, or the "
+            f"verdicts become post-hoc.")
+    pos = {int(c): k for k, c in enumerate(st.clip_ids)}
+    return {cls: np.array([pos[i] for i in ids if i in pos], dtype=int)
+            for cls, ids in part.items()}
 
 
 def write_table(rows: list[dict], out_csv: str) -> pd.DataFrame:

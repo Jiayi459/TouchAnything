@@ -56,8 +56,12 @@ def fit_and_forecast(cfg: Config, splits: dict):
     """Fit/select every baseline; return (results, mask, extras). results[name] has masked
     metric arrays; extras carries the seasonal periods."""
     train, val, test = (load_group(cfg, splits[k]) for k in ("train", "val", "test"))
-    gtr = group_keys(cfg, splits["train"]); gva = group_keys(cfg, splits["val"])
-    gte = group_keys(cfg, splits["test"])
+    # TRAIN-relative grouping (2026-08-15): with a location-level split a category can be
+    # common corpus-wide yet absent from TRAIN, and AR would then be asked for a group it
+    # never fit. Counting within TRAIN sends those to "other". See dataset.group_keys.
+    tr_ids = splits["train"]
+    gtr = group_keys(cfg, tr_ids, tr_ids); gva = group_keys(cfg, splits["val"], tr_ids)
+    gte = group_keys(cfg, splits["test"], tr_ids)
     norm = Norm.from_train(train)
     thr = force_thresholds(cfg, train)
     C = len(cfg.channels)
@@ -140,13 +144,40 @@ def _fingerprint(results: dict) -> np.ndarray:
 
 
 def main():
-    raise NotImplementedError(
-        "src/opentouch/splits.py does not exist yet -- whether OpenTouch's '_p1'/'_p2' "
-        "shard suffix denotes participant or recording session is unresolved (see "
-        "configs/opentouch/eval_harness.yaml 'split' block and SESSION_LOG 2026-08-10). "
-        "fit_and_forecast()/build_rows()/score_external() all work today given a "
-        "caller-supplied `splits` dict; only the CLI entry point is blocked."
-    )
+    """Run the frozen protocol end to end on the location-level split.
+
+    Unblocked 2026-08-15: splits.py holds out whole LOCATIONS, which is leak-free whether
+    the '_p1'/'_p2' suffix means participant or session, so the unresolved question no
+    longer gates this entry point. What it still cannot promise is participant-disjointness
+    across locations -- no manifest field identifies people. Report it as location-held-out,
+    not participant-held-out.
+    """
+    import argparse
+    from . import splits as SP
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--config", default="configs/opentouch/eval_harness.yaml")
+    ap.add_argument("--splits", help="splits.json to reuse; built and saved if absent")
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--out", help="default: paths.out_csv from the config")
+    a = ap.parse_args()
+
+    cfg = load_config(a.config)
+    path = a.splits or cfg.abspath("split_file")
+    if os.path.exists(path):
+        sp = SP.load(cfg, path)
+        print(f"loaded split {path}")
+    else:
+        sp = SP.build(cfg, seed=a.seed)
+        print(f"built split -> {SP.save(cfg, sp, path)}")
+    print(SP.summarize(cfg, sp))
+
+    results, norm, extras = fit_and_forecast(cfg, sp)
+    df = write_table(build_rows(cfg, results), a.out or cfg.abspath("out_csv"))
+    print(f"wrote {a.out or cfg.abspath('out_csv')} ({len(df)} rows)")
+    print(f"seasonal periods fitted: {len(extras.get('seasonal_periods') or {})} | "
+          f"AR orders: {extras.get('ar_orders')}")
+    return 0
 
 
 if __name__ == "__main__":

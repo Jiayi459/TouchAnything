@@ -113,8 +113,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="configs/opentouch/eval_harness.yaml")
     ap.add_argument("--gru-config", default="configs/opentouch/gru_aggregate.yaml")
+    ap.add_argument("--split-mode", default="location", choices=["location", "adhoc"],
+                    help="location = src/opentouch/splits.py, the real protocol; adhoc = "
+                         "the field-level fallback this script used before splits.py existed")
     ap.add_argument("--split-field", default="scene",
-                    help="manifest field held out as a whole (scene/shard/environment)")
+                    help="--split-mode adhoc only: manifest field held out as a whole")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--epochs", type=int, help="override the GRU epochs (smoke runs)")
     ap.add_argument("--histories", help="override the history sweep, e.g. 1,2,3 (seconds)")
@@ -132,22 +135,32 @@ def main():
     clips = eligible_clips(cfg)
     if args.max_clips and len(clips) > args.max_clips:
         clips = random.Random(args.seed).sample(clips, args.max_clips)
-    splits, n_units, moved = adhoc_split(cfg, clips, args.split_field, args.seed)
-    tag = f"adhoc-{args.split_field}-seed{args.seed}"
-    print(f"eligible clips {len(clips)} | {args.split_field} units {n_units} | "
-          f"train {len(splits['train'])} val {len(splits['val'])} test {len(splits['test'])}")
-    if moved:
-        print(f"  moved into TRAIN to cover AR fit groups it would never have seen: {moved}")
-    if min(len(v) for v in splits.values()) == 0:
+    if args.split_mode == "location":
+        from src.opentouch import splits as SP
+        splits = SP.build(cfg, seed=args.seed)
+        tag = f"location-seed{args.seed}"
+        print(SP.summarize(cfg, splits))
+    else:
+        splits, n_units, moved = adhoc_split(cfg, clips, args.split_field, args.seed)
+        tag = f"adhoc-{args.split_field}-seed{args.seed}"
+        print(f"eligible clips {len(clips)} | {args.split_field} units {n_units} | "
+              f"train {len(splits['train'])} val {len(splits['val'])} "
+              f"test {len(splits['test'])}")
+        if moved:
+            print(f"  moved into TRAIN to cover AR groups it would never have seen: {moved}")
+    # splits.build() returns metadata keys (locations, seed, frac, unit) alongside the three
+    # id lists, so only the buckets may be measured here.
+    if min(len(splits[b]) for b in ("train", "val", "test")) == 0:
         raise SystemExit("a split came out empty -- too few holdout units; "
-                         "try --split-field shard, or a different --seed")
+                         "try --split-mode adhoc, or a different --seed")
 
     # The check dataset.missing_groups() exists for: AR fits per group and raises KeyError
-    # deep inside ar.py if asked to score one it never fit. Assert here, where the message
-    # can say what is wrong, rather than 20 minutes into a run.
-    gtr = group_keys(cfg, splits["train"])
+    # deep inside ar.py if asked to score one it never fit. splits.build() already asserts
+    # it; repeated here because --split-mode adhoc does not go through it.
+    tr = splits["train"]
+    gtr = group_keys(cfg, tr, tr)
     for part in ("val", "test"):
-        miss = missing_groups(gtr, group_keys(cfg, splits[part]))
+        miss = missing_groups(gtr, group_keys(cfg, splits[part], tr))
         if miss:
             raise SystemExit(f"{part} carries AR groups absent from train: {sorted(miss)}")
 

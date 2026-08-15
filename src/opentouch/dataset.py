@@ -54,7 +54,8 @@ def category_counts(cfg: Config, field: str) -> dict[str, int]:
     return collections.Counter((r.get(field) or "").strip() for r in _manifest(cfg))
 
 
-def group_keys(cfg: Config, idxs: list[int]) -> dict[int, str]:
+def group_keys(cfg: Config, idxs: list[int],
+               train_idxs: list[int] | None = None) -> dict[int, str]:
     """Map each clip idx -> its AR fit group.
 
     'global' scope => one group "ALL". Otherwise cfg.fit_scope names a manifest field
@@ -65,25 +66,59 @@ def group_keys(cfg: Config, idxs: list[int]) -> dict[int, str]:
 
     RARE-CATEGORY MERGING (OQ-I, SESSION_LOG 2026-08-10): object_category is badly
     long-tailed (110 distinct values measured; 81 have n<30, several n=1). Any value
-    with fewer than `baselines.min_group_size` clips CORPUS-WIDE (not just within the
-    queried idxs) is merged into a single "other" group instead of being fit alone --
-    both because a 1-3 clip group can't support a stable AR fit, and because this is
-    the mechanism that makes option (a) from OQ-I work: a rare category being absent
-    from one split's idxs no longer means AR sees a group it never fit (see
-    missing_groups below for the complementary runtime check).
+    with fewer than `baselines.min_group_size` clips is merged into a single "other"
+    group instead of being fit alone, because a 1-3 clip group cannot support a stable
+    AR fit.
+
+    WHERE THAT COUNT COMES FROM (changed 2026-08-15, user decision). Passing
+    `train_idxs` counts within TRAIN; omitting it counts corpus-wide, the original
+    behaviour, kept so existing callers and tests are unaffected.
+
+    Counting corpus-wide was meant to deliver OQ-I option (a) -- "a rare category being
+    absent from one split's idxs no longer means AR sees a group it never fit" -- and it
+    does when the split is fine-grained, because a common category then lands on both
+    sides by sheer numbers. It fails exactly when the split is coarse enough to matter:
+    objects belong to locations, so holding out a whole location takes its categories
+    with it, and a category that is common corpus-wide can still be entirely absent from
+    TRAIN. That is what raised KeyError('sports equipment') on 2026-08-13. Counting
+    within TRAIN closes it at the definition: a category is its own group only if TRAIN
+    can actually fit it, and everything else -- rare, or absent from TRAIN altogether --
+    lands in "other", which TRAIN does fit.
+
+    THE CATCH-ALL MUST ITSELF BE FITTABLE. Sending strangers to "other" only helps if
+    TRAIN fits "other", and it might not: if every TRAIN category clears the threshold,
+    no TRAIN clip is "other" at all, and a held-out category mapped there is as unfitted
+    as before -- which is what the splits tests hit on the first run. So under
+    TRAIN-relative counting the smallest qualifying categories are pooled into "other",
+    smallest first, until it holds `min_group_size` TRAIN clips. It costs one or two
+    categories their own AR fit; it buys the guarantee that every group AR is asked to
+    score is one it fitted. missing_groups() remains the backstop assertion.
     """
     if cfg.fit_scope == "global":
         return {i: "ALL" for i in idxs}
     field = cfg.fit_scope
     min_size = cfg.raw["baselines"].get("min_group_size", 1)
-    counts = category_counts(cfg, field)
     rows = {r["idx"]: r for r in _manifest(cfg)}
+    demoted: set[str] = set()
+    if train_idxs is None:
+        counts = category_counts(cfg, field)
+    else:
+        counts = collections.Counter(
+            (rows[i].get(field) or "").strip() for i in train_idxs)
+        pooled = sum(n for v, n in counts.items() if n < min_size)
+        # smallest first, so the fewest TRAIN clips lose their own fit
+        for v, n in sorted(((v, n) for v, n in counts.items() if n >= min_size),
+                           key=lambda vn: (vn[1], vn[0])):
+            if pooled >= min_size:
+                break
+            demoted.add(v); pooled += n
     out = {}
     for i in idxs:
         v = (rows[i].get(field) or "").strip()
         if not v:
-            out[i] = "unknown"
-        elif counts.get(v, 0) < min_size:
+            out[i] = "unknown" if counts.get("", 0) >= min_size and "" not in demoted \
+                else "other"
+        elif counts.get(v, 0) < min_size or v in demoted:
             out[i] = "other"
         else:
             out[i] = v

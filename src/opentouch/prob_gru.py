@@ -284,3 +284,26 @@ def predict(model, cfg: Config, norm: Norm, fnorm: FeatNorm, vocab, by_idx,
             test_ids: list[int], t_in: int) -> dict[int, np.ndarray]:
     return {i: predict_clip(model, cfg, norm, fnorm, vocab, by_idx, i, t_in)
             for i in test_ids}
+
+
+@torch.no_grad()
+def predict_with_sigma(model, cfg: Config, norm: Norm, fnorm: FeatNorm, vocab, by_idx,
+                       i: int, t_in: int) -> tuple[np.ndarray, np.ndarray]:
+    """(mu, sigma) in RAW units, both (n_origins, H, C).
+
+    The harness scores the mean only, so predict() drops the variance head; a forecast
+    plot is the one place it should be visible, since a probabilistic model whose spread
+    is never shown is indistinguishable from a point model. z-scoring is per channel and
+    linear, so sigma_raw = exp(lv/2) * norm.std -- the mean shift cancels.
+    """
+    model.eval()
+    X, A, L, _ = window_set(cfg, [i], t_in, norm, fnorm, vocab, by_idx)
+    C = len(cfg.channels)
+    if len(X) == 0:
+        z = np.zeros((0, cfg.horizon, C))
+        return z, z
+    dev = next(model.parameters()).device
+    mu, lv = model(X.to(dev), A.to(dev), L.to(dev), cfg.horizon)
+    mu = mu.cpu().numpy().astype(np.float64)
+    sd = np.exp(0.5 * lv.cpu().numpy().astype(np.float64)) * np.asarray(norm.std)
+    return norm.unz(mu), sd

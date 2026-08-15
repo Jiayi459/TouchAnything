@@ -1,29 +1,25 @@
-"""EXPLORATORY OpenTouch run: classical baselines + GRU-aggregate, whole corpus.
+"""OpenTouch run: classical baselines + a GRU arm, over the whole corpus.
 
-NOT THE FROZEN PROTOCOL, AND ITS NUMBERS ARE NOT REPORTABLE. src/opentouch/splits.py does
-not exist (whether the "_p1"/"_p2" shard suffix is participant or session is unresolved),
-so evaluate.main() deliberately raises; this script supplies its own ad-hoc split instead.
-Every output file and every CSV row is tagged exploratory=True so a later reader cannot
-mistake it for a harness result.
+STILL EXPLORATORY, THOUGH LESS SO THAN IT WAS. It now defaults to the real location-level
+split (src/opentouch/splits.py, 2026-08-15) rather than the ad-hoc one it was born with,
+and --folds runs the grouped cross-validation. What keeps it exploratory is D1: the raw
+pressure carries a large DC offset (F sits near 750k and moves by ~4%; CoP barely leaves
+the sensor centre), so a forecaster is mostly being asked to predict a constant.
+Persistence looks strong and skill reads high for reasons unrelated to dynamics. Every row
+is tagged exploratory=True until that is settled.
 
 WHAT IT DOES NOT DO, ON PURPOSE
-  * No smooth/abrupt grouping. G2's trait classification is still being adjudicated (36
-    unaudited actions; OQ-L/OQ-M unsigned), and the design requires those verdicts to be
-    frozen BEFORE any per-class number is seen. Scoring the corpus as a whole cannot
-    contaminate them.
+  * No smooth/abrupt grouping. The user's ruling (2026-08-15) is to train on everything and
+    separate only when scoring, and evaluate.trait_rows() does that -- but it refuses while
+    any TEST action is unadjudicated, and 36 such actions remain. Per-class numbers must
+    wait for those verdicts or they make the verdicts post-hoc.
   * No edit to configs/opentouch/eval_harness.yaml. config_hash is the hash of that file;
     editing it to repoint states_root would silently break comparability with every run
     that came before. Point the path with a symlink instead:
-        ln -s ~/opentouch/cache data/opentouch_states
+        ln -sfn ~/opentouch/cache data/opentouch_states
 
-READ THE NUMBERS WITH THIS IN MIND: as of 2026-08-13 the raw pressure carries a large DC
-offset (F sits near 750k and moves by ~4%; CoP barely leaves the sensor centre), so a
-forecaster is mostly being asked to predict a constant. Persistence will look strong and
-R^2/skill will be flattering for reasons that have nothing to do with dynamics. That is
-the open D1 decision, not a result.
-
-    python scripts/run_opentouch_exploratory.py                    # baselines + GRU
-    python scripts/run_opentouch_exploratory.py --skip-gru         # baselines only, fast
+    python scripts/run_opentouch_exploratory.py --folds 4 --save-preds runs/preds
+    python scripts/run_opentouch_exploratory.py --model none          # baselines only, fast
     python scripts/run_opentouch_exploratory.py --epochs 5 --max-clips 300   # smoke test
 """
 from __future__ import annotations
@@ -34,6 +30,8 @@ import csv
 import os
 import random
 import sys
+
+import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.actionsense.eval_harness.config import load_config          # noqa: E402
@@ -131,6 +129,9 @@ def main():
     ap.add_argument("--folds", type=int,
                     help="run k grouped folds (every location held out once) instead of "
                          "a single split; location mode only")
+    ap.add_argument("--save-preds", metavar="DIR",
+                    help="dump per-clip forecasts (mean, and sigma for prob_gru) so "
+                         "scripts/plot_opentouch_forecast.py can draw them without retraining")
     ap.add_argument("--out", default="docs/exploratory_opentouch.csv")
     args = ap.parse_args()
 
@@ -234,6 +235,7 @@ def run_split(cfg, splits, args, tag):
     for m in EV.MODELS:
         rows += emit_rows(cfg, m, results[m], results, tag)
 
+    ext, sig = {}, {}
     want = [] if (args.skip_gru or args.model == "none") else (
         ["prob_gru", "gru_aggregate"] if args.model == "both" else [args.model])
     for which in want:
@@ -273,7 +275,63 @@ def run_split(cfg, splits, args, tag):
         R = EV.score_external(cfg, splits, which, preds, results, norm)
         rows += emit_rows(cfg, which, R, results, tag)
         results[which] = R
+        ext[which] = preds
+        if which == "prob_gru" and args.save_preds:
+            from src.opentouch import prob_gru as P
+            sig[which] = {i: P.predict_with_sigma(model, cfg, norm, fnorm, vocab,
+                                                  by_idx, i, t_in)[1]
+                          for i in splits["test"]}
+
+    if args.save_preds:
+        save_predictions(cfg, splits, norm, ext, sig, args.save_preds, tag)
     return rows, results
+
+
+def save_predictions(cfg, splits, norm, ext, sig, out_dir, tag):
+    """Dump per-clip forecasts so a plot can be drawn without retraining.
+
+    The first full run wrote only the metric table, which meant the four hours of GPU time
+    could not produce a single forecast curve. Baseline predictions are recomputed here
+    with clip provenance (predict_series_by_clip) rather than reconstructed from the
+    concatenated arrays evaluate.fit_and_forecast returns.
+    """
+    from src.opentouch.baselines import origins
+    from src.opentouch.dataset import load_group
+
+    os.makedirs(out_dir, exist_ok=True)
+    test = load_group(cfg, splits["test"])
+    tr_ids = splits["train"]
+    gte = group_keys(cfg, splits["test"], tr_ids)
+    gtr = group_keys(cfg, tr_ids, tr_ids)
+    train, val = load_group(cfg, tr_ids), load_group(cfg, splits["val"])
+    gva = group_keys(cfg, splits["val"], tr_ids)
+
+    per_clip = {}
+    for name in EV.MODELS:
+        bl = EV.CLASSES[name](cfg, norm)
+        bl.fit(train, gtr); bl.select(val, gva, cfg.horizon)
+        _, yh, ids = EV.BL.predict_series_by_clip(bl, test, gte, cfg)
+        at = 0
+        for i, Y in sorted(test.items()):
+            n = len(origins(len(Y), cfg))
+            per_clip.setdefault(i, {})[name] = yh[at:at + n]
+            at += n
+    for name, d in ext.items():
+        for i, v in d.items():
+            per_clip.setdefault(i, {})[name] = v
+
+    rows = {r["idx"]: r for r in eligible_clips(cfg, actions=())}
+    for i, models in per_clip.items():
+        np.savez_compressed(
+            os.path.join(out_dir, f"clip_{i}.npz"),
+            y=np.asarray(test[i], dtype=np.float64),
+            origins=np.asarray(origins(len(test[i]), cfg)),
+            fps=cfg.fps, action=rows.get(i, {}).get("action", ""),
+            object_name=rows.get(i, {}).get("object_name", ""),
+            channels=np.array(cfg.channels), tag=tag,
+            **{f"mu_{k}": v for k, v in models.items()},
+            **{f"sigma_{k}": v[i] for k, v in sig.items() if i in v})
+    print(f"  saved {len(per_clip)} clips of forecasts -> {out_dir}")
 
 
 def write_and_report(cfg, rows, results, out, tag):

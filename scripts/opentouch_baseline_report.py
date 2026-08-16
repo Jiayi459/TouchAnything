@@ -20,9 +20,11 @@ are separated, each with its own interpretable parameter:
     and any taxel above 0.5 is flagged as one whose median is contaminated by contact.
 
   NOISE = an explicit soft threshold, X <- max(X - k*sigma, 0), with sigma estimated ONE
-    SIDED: 1.4826 * MAD over the frames at or below the median. Contact can only push a
-    reading up, so excluding the upper half keeps grasps out of the noise estimate. k is
-    swept, not fixed, so its influence is visible rather than baked in.
+    SIDED: 1.4826 * MAD over the frames at or below the median, FLOORED at half a
+    quantisation step. Contact can only push a reading up, so excluding the upper half
+    keeps grasps out of the noise estimate; the floor is there because the readings are
+    integers and the bare MAD came out at exactly zero on all 26 shards, which silently
+    disabled the threshold. k is swept, not fixed, so its influence is visible.
 
 THE THREE DIAGNOSTICS THE USER ASKED FOR
   1. Rectification bias: among taxels that should be idle (never loaded across the whole
@@ -73,14 +75,35 @@ def shard_frames(cache, rows, max_frames, stride):
     return np.concatenate(out, 0)[:max_frames], used
 
 
-def estimate(frames):
-    """-> (baseline (256,), sigma (256,)). Median, and a one-sided robust scale."""
+def quantum(frames):
+    """The reading's quantisation step: the smallest positive gap between distinct values.
+
+    The corpus stores integer-valued counts (every per-shard baseline came out on a whole
+    number), so a scale estimator can and does collapse to zero -- see estimate()."""
+    v = np.unique(frames)
+    if v.size < 2:
+        return 1.0
+    d = np.diff(v)
+    d = d[d > 0]
+    return float(np.min(d)) if d.size else 1.0
+
+
+def estimate(frames, q=None):
+    """-> (baseline (256,), sigma (256,)). Median, and a one-sided robust scale.
+
+    WHY SIGMA HAS A FLOOR. The first version used 1.4826 * MAD over the frames at or below
+    the median and reported a median sigma of exactly 0.00 on every one of the 26 shards
+    (2026-08-16). That is not a quiet sensor: the readings are quantised, most taxels sit on
+    one integer while not being touched, so more than half the below-median residuals are
+    exactly zero and the MAD with them. A zero sigma makes the soft threshold inert -- k
+    stops doing anything, which is what the first k sweep showed. Sub-quantum noise cannot
+    be resolved, so the floor is half a quantisation step: the smallest scale at which the
+    reading could vary at all."""
     base = np.median(frames, axis=0)
     below = np.where(frames <= base, frames, np.nan)          # keep the lower half only
-    mad = np.nanmedian(np.abs(below - base), axis=0)
-    sigma = MAD_TO_SIGMA * np.nan_to_num(mad, nan=0.0)
-    sigma[sigma <= 0] = np.finfo(np.float32).eps
-    return base, sigma
+    mad = MAD_TO_SIGMA * np.nan_to_num(np.nanmedian(np.abs(below - base), axis=0), nan=0.0)
+    q = quantum(frames) if q is None else q
+    return base, np.maximum(mad, 0.5 * q)
 
 
 def moments(p):
@@ -95,13 +118,21 @@ def moments(p):
 
 def census(frames, base, sigma):
     """dead / stuck / saturated counts. Measured, because the documented assumption that
-    dead cells read ~0 is false on this corpus."""
+    dead cells read ~0 is false on this corpus -- every shard reports zero dead cells.
+
+    SATURATED is "rails at its own ceiling", not "reaches the pooled 99.9th percentile".
+    The first version used the latter and flagged 212-256 of 256 cells on every shard,
+    which measured only how tight the pooled distribution is. A railed cell sits AT its
+    maximum for a sustained fraction of the recording; a cell that merely touches its max
+    once has not saturated. Equality is EXACT rather than within a tolerance: these are
+    quantised counts, a railed cell returns the same integer over and over, and a tolerance
+    of half a sigma re-admitted half the grid on the first attempt."""
     rng = frames.max(0) - frames.min(0)
-    hi = np.percentile(frames, 99.9)
+    at_max = (frames == frames.max(0)).mean(0)      # EXACT equality: a rail is a rail
     return {
-        "dead": int(((frames.max(0) <= 1e-6)).sum()),                  # never reads
-        "stuck": int(((rng <= 3 * sigma) & (frames.max(0) > 1e-6)).sum()),   # non-zero, never moves
-        "saturated": int((frames.max(0) >= hi).sum()),                 # rails at the top
+        "dead": int((frames.max(0) <= 1e-6).sum()),                    # never reads
+        "stuck": int(((rng <= 3 * sigma) & (frames.max(0) > 1e-6)).sum()),
+        "saturated": int(((at_max > 0.05) & (rng > 3 * sigma)).sum()),
     }
 
 
@@ -149,7 +180,10 @@ def main():
     print(f"shard {s0}")
     print(f"{'k':>4s} {'F mean':>12s} {'F std':>10s} {'F cv':>7s} "
           f"{'CoPx range':>11s} {'CoPy range':>11s} {'rect. bias':>11s}")
-    idle = frames.max(0) <= np.percentile(frames.max(0), 5)       # the quietest 5% of cells
+    # Idle = smallest EXCURSION above its own baseline, not smallest maximum: with every
+    # cell resting near 3050, ranking by max ranks the baselines, not the activity.
+    exc = frames.max(0) - base
+    idle = exc <= np.percentile(exc, 5)
     print(f"{'raw':>4s} {F0.mean():12.1f} {F0.std():10.1f} {F0.std()/max(F0.mean(),1e-9):7.4f} "
           f"{cx0.max()-cx0.min():11.4f} {cy0.max()-cy0.min():11.4f} {'--':>11s}")
     for k in ks:
@@ -169,9 +203,10 @@ def main():
               f"p90 {np.percentile(spread, 90):.1f}")
         print(f"relative to the level:                median {np.median(rel):.3f}, "
               f"p90 {np.percentile(rel, 90):.3f}")
-        print("A relative spread that is not small means the baseline must stay per shard: "
-              "one corpus-wide baseline would leave a session offset in the signal, which "
-              "is exactly what a location-held-out model cannot memorise.")
+        print("Small relative spread means one corpus-wide baseline would do for most "
+              "taxels; a heavy upper tail means it would not for the rest, and a residual "
+              "session offset is exactly what a location-held-out model cannot memorise. "
+              "Read the median and the p90 together -- they can disagree.")
 
 
 if __name__ == "__main__":

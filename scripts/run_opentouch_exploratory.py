@@ -132,6 +132,10 @@ def main():
     ap.add_argument("--save-preds", metavar="DIR",
                     help="dump per-clip forecasts (mean, and sigma for prob_gru) so "
                          "scripts/plot_opentouch_forecast.py can draw them without retraining")
+    ap.add_argument("--save-model", metavar="DIR",
+                    help="checkpoint the probGRU per split (weights, hyperparameters, "
+                         "action vocabulary and both normalizers -- everything needed to "
+                         "reproduce a forecast without retraining)")
     ap.add_argument("--out", default="docs/exploratory_opentouch.csv")
     args = ap.parse_args()
 
@@ -276,6 +280,17 @@ def run_split(cfg, splits, args, tag):
         rows += emit_rows(cfg, which, R, results, tag)
         results[which] = R
         ext[which] = preds
+        if which == "prob_gru" and args.save_model:
+            import torch
+            os.makedirs(args.save_model, exist_ok=True)
+            ck = os.path.join(args.save_model, f"prob_gru_{tag}.pt")
+            torch.save({"state_dict": model.state_dict(), "hp": hp, "t_in": t_in,
+                        "vocab": vocab, "by_idx": by_idx,
+                        "norm": {"mean": norm.mean, "std": norm.std},
+                        "fnorm": {"mean": fnorm.mean, "std": fnorm.std},
+                        "channels": list(cfg.channels), "config_hash": cfg.config_hash,
+                        "split": tag, "history": hist, "sweep": scores}, ck)
+            print(f"  saved model -> {ck}")
         if which == "prob_gru" and args.save_preds:
             from src.opentouch import prob_gru as P
             sig[which] = {i: P.predict_with_sigma(model, cfg, norm, fnorm, vocab,

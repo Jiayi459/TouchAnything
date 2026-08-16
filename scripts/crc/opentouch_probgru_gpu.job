@@ -7,16 +7,17 @@
 # 7 s/epoch at t_in=30). That is both too slow to iterate on and heavier than a login node
 # should carry.
 #
-# WHAT IT PRODUCES IS EXPLORATORY, NOT REPORTABLE: splits.py does not exist, so the driver
-# makes an ad-hoc scene-level split, and F is still DC-dominated (D1 open). Every CSV row is
-# tagged exploratory=True. See SESSION_LOG 2026-08-13.
+# WHAT IT PRODUCES IS EXPLORATORY, NOT REPORTABLE. It now defaults to the real location-level
+# split and FOLDS=4 runs the grouped cross-validation, but D1 (the DC offset) and D2 (the
+# label misjoin in 10 of 26 shards) are both open, so these numbers will be superseded once
+# either is settled. Every CSV row is tagged exploratory=True. See SESSION_LOG 2026-08-15.
 #
 # Prerequisites (once):
 #   ln -sfn ~/opentouch/cache ~/TouchAnything/data/opentouch_states
 #   mkdir -p ~/TouchAnything/logs
 # Submit from the repo root:
 #   qsub scripts/crc/opentouch_probgru_gpu.job
-#   qsub -v EPOCHS=20,MODEL=both scripts/crc/opentouch_probgru_gpu.job
+#   qsub -v FOLDS=4,SAVE_PREDS=runs/preds,SAVE_MODEL=runs/models scripts/crc/opentouch_probgru_gpu.job
 #   qsub -v MAX_CLIPS=300,EPOCHS=2 scripts/crc/opentouch_probgru_gpu.job     # smoke
 # Watch it:
 #   qstat -u $USER ; tail -f logs/opentouch_probgru.o<JOB_ID>
@@ -53,8 +54,11 @@ python -m pytest tests/test_opentouch_prob_gru.py tests/test_opentouch_gru_aggre
 
 python -u scripts/run_opentouch_exploratory.py \
     --model "${MODEL:-prob_gru}" \
-    --split-field "${SPLIT_FIELD:-scene}" \
+    --split-mode "${SPLIT_MODE:-location}" \
     --seed "${SEED:-0}" \
+    ${FOLDS:+--folds "$FOLDS"} \
+    ${SAVE_PREDS:+--save-preds "$SAVE_PREDS"} \
+    ${SAVE_MODEL:+--save-model "$SAVE_MODEL"} \
     ${EPOCHS:+--epochs "$EPOCHS"} \
     ${HISTORIES:+--histories "$HISTORIES"} \
     ${MAX_CLIPS:+--max-clips "$MAX_CLIPS"} \

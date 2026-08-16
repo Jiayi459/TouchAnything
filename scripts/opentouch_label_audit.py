@@ -74,6 +74,10 @@ def main():
     ap.add_argument("--examples", type=int, default=8,
                     help="worst-mismatched clips to print per shard")
     ap.add_argument("--tol", type=int, default=2, help="frames of slack before mismatch")
+    ap.add_argument("--write-flags", metavar="PATH",
+                    help="record the mismatched clips so downstream code can refuse to "
+                         "trust their onset/peak/post indices "
+                         "(default target: data/opentouch_peak_mismatch.json)")
     a = ap.parse_args()
 
     man = load(a.cache)
@@ -144,6 +148,25 @@ def main():
             print(f"{idx:6d} {act[:16]:16s} {d:5d} {v if v else float('nan'):9.1f} "
                   f"{rv:9.1f} {w if w else float('nan'):6.3f} {rh:6.3f}  {verdict}")
         print()
+
+    if a.write_flags:
+        os.makedirs(os.path.dirname(a.write_flags) or ".", exist_ok=True)
+        flat = sorted(i for v in mism.values() for i, _, _ in v)
+        with open(a.write_flags, "w") as f:
+            json.dump({
+                "clips": flat,
+                "per_shard": {s: {"clips": per_shard[s], "mismatch": len(mism[s])}
+                              for s in sorted(mism) if mism[s]},
+                "tol_frames": a.tol,
+                "what_is_wrong": "onset_idx/peak_idx/post_idx disagree with the clip's own "
+                                 "argmax(F). The 2026-08-16 audit found the ACTION labels "
+                                 "plausible for the signals (46 consistent, 1 implausible), "
+                                 "so this is an index-basing bug concentrated in shards that "
+                                 "share one annotation CSV, not a label swap.",
+                "safe_to_use": "action, object_category, scene, shard, T, fps_est",
+                "not_safe_to_use": "onset_idx, peak_idx, post_idx",
+            }, f, indent=2)
+        print(f"wrote {a.write_flags}  ({len(flat)} clips flagged)\n")
 
     print("HOW TO READ THIS. A shard whose mismatches are mostly 'consistent' is one where "
           "the indices are off but the labels are probably right -- a join or basing bug, "

@@ -25,10 +25,21 @@ No baseline correction has been applied anywhere upstream (deliberate).
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 
 import numpy as np
+
+# Clips whose annotated event indices are known to disagree with their own signal
+# (2026-08-16 audit). The labels are fine; these three indices are not, so drawing them
+# would put a "peak" marker where the peak is not.
+def _mismatched(path="data/opentouch_peak_mismatch.json"):
+    try:
+        with open(path) as f:
+            return set(json.load(f)["clips"])
+    except (OSError, KeyError, ValueError):
+        return set()
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scripts.plot_opentouch_fcop import load_manifest, pick  # noqa: E402
@@ -68,6 +79,7 @@ def main():
     import matplotlib.pyplot as plt
 
     rows = load_manifest(args.cache)
+    bad_idx = _mismatched()
     if args.idx:
         want = [int(i) for i in args.idx.split(",") if i.strip()]
         by_idx = {r["idx"]: r for r in rows}
@@ -94,6 +106,10 @@ def main():
         p = np.load(path).astype(np.float32)[:, 0]      # (T,16,16), hand axis is 1
         st = np.load(os.path.join(args.cache, f"state_{r['idx']}.npy"))
         frames, tags = frame_set(r, p.shape[0], args.frames)
+        if r["idx"] in bad_idx:
+            # Flagged by the 2026-08-16 audit: these indices disagree with the clip's own
+            # argmax(F), so the frames stay but the event captions do not.
+            tags = {}
         loaded.append((action, r, p, st, frames, tags))
 
     ncol = max(len(f) for *_, f, _ in loaded) + 1       # +1 for the F(t) curve
@@ -126,8 +142,9 @@ def main():
                          f"F={F:.0f} n={area}", fontsize=6.5,
                          color="crimson" if tag == "peak" else "black")
             if col == 0:
-                ax.set_ylabel(f"[{r['idx']}] {action}\n{r.get('object_name', '') or '?'}",
-                              fontsize=7)
+                flag = "\n[event idx unreliable]" if r["idx"] in bad_idx else ""
+                ax.set_ylabel(f"[{r['idx']}] {action}\n"
+                              f"{r.get('object_name', '') or '?'}{flag}", fontsize=7)
 
         # Last column: the whole F(t) curve with the sampled frames marked, so whether
         # peak_idx really sits at the maximum is read off the curve, not guessed from

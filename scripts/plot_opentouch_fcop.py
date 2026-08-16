@@ -24,6 +24,16 @@ import os
 
 import numpy as np
 
+# Clips whose annotated event indices are known to disagree with their own signal
+# (2026-08-16 audit). The labels are fine; these three indices are not, so drawing them
+# would put a "peak" marker where the peak is not.
+def _mismatched(path="data/opentouch_peak_mismatch.json"):
+    try:
+        with open(path) as f:
+            return set(json.load(f)["clips"])
+    except (OSError, KeyError, ValueError):
+        return set()
+
 CHANNELS = [(0, "F (total force, a.u.)"), (1, "CoP x  [-1,1]"), (2, "CoP y  [-1,1]")]
 
 
@@ -54,6 +64,7 @@ def main():
     import matplotlib.pyplot as plt
 
     rows = load_manifest(args.cache)
+    bad_idx = _mismatched()
     actions = [a.strip() for a in args.actions.split(",") if a.strip()]
     picked = [(a, r) for a in actions for r in pick(rows, a, args.n)]
     if not picked:
@@ -70,8 +81,12 @@ def main():
             ax = axes[row_i][col]
             ax.plot(t, st[:, 0, ch], lw=0.9)
             # Clips are segmented around a pressure peak; onset/peak/post make the
-            # event structure visible, which is exactly what smooth vs abrupt is about.
-            for key, style in (("onset_idx", ":"), ("peak_idx", "--"), ("post_idx", ":")):
+            # event structure visible, which is exactly what smooth vs abrupt is about --
+            # except on the clips the 2026-08-16 audit flagged, where those indices
+            # disagree with the clip's own argmax(F). Drawing them there would mark a
+            # "peak" where the peak is not, so they are omitted and the row says so.
+            for key, style in (() if r["idx"] in bad_idx else
+                               (("onset_idx", ":"), ("peak_idx", "--"), ("post_idx", ":"))):
                 v = r.get(key)
                 try:
                     v = int(v)
@@ -82,7 +97,9 @@ def main():
             if row_i == 0:
                 ax.set_title(name, fontsize=10)
             if col == 0:
-                ax.set_ylabel(f"{action}\n{r.get('object_name', '') or '?'}", fontsize=8)
+                flag = "  [event idx unreliable]" if r["idx"] in bad_idx else ""
+                ax.set_ylabel(f"{action}\n{r.get('object_name', '') or '?'}{flag}",
+                              fontsize=8)
             if row_i == len(picked) - 1:
                 ax.set_xlabel("time (s)")
             ax.tick_params(labelsize=7)

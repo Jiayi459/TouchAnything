@@ -57,7 +57,9 @@ def test_models_are_fit_once_and_scored_per_class(tmp_path):
 
 def test_unaudited_action_refuses_to_score(tmp_path):
     """The 36 unadjudicated actions must block scoring, not default silently."""
-    cfg = make_cfg(tmp_path, ["holding", "lifting"] * 12)
+    # a string that is not in the table and never will be -- "lifting" served here until
+    # the 2026-08-15 blind pass audited it, which is exactly the completeness this guards
+    cfg = make_cfg(tmp_path, ["holding", "levitating"] * 12)
     st, _ = EV.collect_clip_stats(cfg, _splits(24))
     with pytest.raises(trait.UnauditedAction):
         EV.trait_rows(cfg, st)

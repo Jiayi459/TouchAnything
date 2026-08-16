@@ -139,11 +139,69 @@ TRAIT_CLASS: dict[str, str] = {
     "eating":      ABRUPT,  # [U]+ user-flagged: "'送入口中'环节可能含 release" + utensil-plate contacts.
     "drinking":    ABRUPT,  # [U]+ user-flagged; hand-cup coupling is sustained, but set-down
                             #      (impact + release) is expected inside a 2.8 s median window.
+
+    # -- THE LONG TAIL, adjudicated BLIND on 2026-08-15 ([B]; user-signed 2026-08-16) ------
+    # The 36 strings the vocabulary-completeness pass surfaced once the labels were in hand.
+    # BLIND means the verdicts were written without looking at how many clips any of them
+    # carries. That mattered here: smooth had 233 clips against abrupt's 2393, and knowing
+    # which words would enlarge the smaller class is exactly the pressure the rubric exists
+    # to resist. Counts were joined only after this table was committed, so "judged on the
+    # physics" is checkable in the history rather than merely asserted.
+    "feeling":       SMOOTH,   # [B] tactile exploration: sustained sliding contact.
+    "scanning":      SMOOTH,   # [B] sweeping a surface; wiping-class.
+    "resting hand":  SMOOTH,   # [B] static sustained contact, minimal modulation.
+    "bending":       SMOOTH,   # [B] continuous deformation under continuous force.
+    "folding":       SMOOTH,   # [B] as bending; creasing presses, never impacts.
+    "unfolding":     SMOOTH,   # [B] as folding.
+    "tilting":       SMOOTH,   # [B] sustained reorientation under grip; pouring-class.
+    "aligning":      SMOOTH,   # [B]+ fine correction under sustained grip, but some instances
+                               #      tap the piece into place -> varies.
+    "measuring":     SMOOTH,   # [B]+ tool held against the object and read; calliper-type
+                               #      instances clamp, which is a grasp event.
+    "taping":        SMOOTH,   # [B]+ the action is pressing tape along a surface; tearing it
+                               #      off is an impulse that some instances include.
+    "twisting":      SMOOTH,   # [B]+ sustained torsional modulation; a cap ends in release.
+    "zipping":       SMOOTH,   # [B]+ continuous travel along the track; the slider engages
+                               #      and disengages at the ends.
+    "attaching":     ABRUPT,   # [B] the engagement instant IS the action (R2).
+    "connecting":    ABRUPT,   # [B] as attaching.
+    "inserting":     ABRUPT,   # [B] seating is constitutive; contact surface changes.
+    "plugging in":   ABRUPT,   # [B] insertion + seating.
+    "detaching":     ABRUPT,   # [B] separation IS the action.
+    "unplugging":    ABRUPT,   # [B] as detaching.
+    "passing":       ABRUPT,   # [B] hand-over: release is constitutive.
+    "dropping":      ABRUPT,   # [B] release IS the action.
+    "tapping":       ABRUPT,   # [B] repeated impacts.
+    "probing":       ABRUPT,   # [B] repeated contact onsets.
+    "typing":        ABRUPT,   # [B] repeated actuation transitions; pressing-class.
+    "spraying":      ABRUPT,   # [B] trigger actuation; pressing-class.
+    "switching on":  ABRUPT,   # [B] actuation transition.
+    "switching off": ABRUPT,   # [B] actuation transition.
+    "lifting":       ABRUPT,   # [B] weight transfers from the surface to the hand; the grasp
+                               #     is constitutive, not preparatory. Matches "picking up".
+    "examining":     ABRUPT,   # [B]+ synonym of the already-ruled "inspecting"; kept
+                               #      consistent with it rather than split on wording.
+    "pointing":      ABRUPT,   # [B]+ touching to indicate IS the action, but many instances
+                               #      never touch at all.
+    "pinching":      ABRUPT,   # [B]+ the closure is a grasp event; read as "hold a pinch" it
+                               #      would be sustained.
+    "rotating":      ABRUPT,   # [B]+ same ambiguity the rubric names for "turning" (knob vs
+                               #      page); kept aligned with that ruling.
+    "screwing":      ABRUPT,   # [B]+ repeated release-and-regrip over a long window.
+    "unscrewing":    ABRUPT,   # [B]+ as screwing.
+    "tightening":    ABRUPT,   # [B]+ ratcheting re-engagement in tool instances.
+    "scrolling":     ABRUPT,   # [B]+ repeated touch-and-lift flicks; a wheel is sustained.
+    "testing":       ABRUPT,   # [B]+ semantically underdetermined; most instances actuate
+                               #      something. Flagged to the user as a candidate for
+                               #      exclusion rather than classification.
 }
 
 CONTENTIOUS: frozenset[str] = frozenset({
     "lowering", "pulling", "pushing", "adjusting", "turning", "moving", "inspecting",
     "cutting", "flipping", "scooping", "serving", "eating", "drinking",
+    # blind pass, 2026-08-15
+    "aligning", "measuring", "taping", "twisting", "zipping", "examining", "pointing",
+    "pinching", "rotating", "screwing", "unscrewing", "tightening", "scrolling", "testing",
 })
 
 assert CONTENTIOUS <= set(TRAIT_CLASS), "CONTENTIOUS must only name audited actions"

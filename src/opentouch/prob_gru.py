@@ -66,7 +66,14 @@ DEFAULT_HP = {"hidden": 48, "epochs": 80, "lr": 0.003, "batch": 64, "seed": 0,
               # "raw" = ActionSense's five inputs verbatim; "raw+df" adds dF/dt as an
               # ablation. Recorded in the checkpoint, so a forecast can never be replayed
               # under the wrong feature set.
-              "features": "raw"}
+              "features": "raw",
+              # Both OFF by default, so the arm stays input- and architecture-identical to
+              # ActionSense unless a run says otherwise. They exist because the 2026-08-17
+              # curves overfit from epoch 2 -- five times sooner than ActionSense's own note
+              # -- and the first thing to try is the one with a mechanism behind it
+              # (features="raw+df" removes the per-location DC level the model can memorise),
+              # not a pile of regularisers applied at once.
+              "weight_decay": 0.0, "dropout": 0.0}
 OTHER = 0          # reserved embedding id: rare-in-TRAIN or unseen-at-TEST actions
 
 
@@ -182,13 +189,15 @@ class ProbGRU(nn.Module):
     """Verbatim from src/actionsense/action_dynamics.py (only `n_out` is read from the data
     instead of hardcoded 3 -- the same channel-count fix the other OpenTouch forks made)."""
 
-    def __init__(self, din: int, n_act: int, hid: int, n_out: int = 3):
+    def __init__(self, din: int, n_act: int, hid: int, n_out: int = 3, dropout: float = 0.0):
         super().__init__()
         self.emb = nn.Embedding(n_act, 8)
         self.enc = nn.GRU(din, hid, batch_first=True)
         self.dec = nn.GRU(n_out, hid, batch_first=True)
         self.mu = nn.Linear(hid + 8, n_out)
         self.lv = nn.Linear(hid + 8, n_out)
+        # Identity at p=0, so the verbatim architecture is what runs unless asked otherwise.
+        self.drop = nn.Dropout(dropout)
 
     def forward(self, x, aid, y_last, t_out):
         _, h = self.enc(x)
@@ -197,7 +206,7 @@ class ProbGRU(nn.Module):
         mus, lvs = [], []
         for _ in range(t_out):
             o, h = self.dec(inp, h)
-            oc = torch.cat([o[:, -1], e], -1)
+            oc = self.drop(torch.cat([o[:, -1], e], -1))
             mu = self.mu(oc); lv = self.lv(oc).clamp(-6, 4)
             mus.append(mu); lvs.append(lv)
             inp = mu.unsqueeze(1)                       # autoregressive: feed the mean back
@@ -250,8 +259,10 @@ def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
         print(f"    [t_in={t_in}] windows: train {len(Xtr)} val {len(Xva)} | "
               f"batches/epoch {-(-len(Xtr) // bs)} | vocab {len(vocab)} | device {dev}",
               flush=True)
-    m = ProbGRU(Xtr.shape[-1], len(vocab), int(hp["hidden"]), n_out=len(cfg.channels)).to(dev)
-    opt = torch.optim.Adam(m.parameters(), lr=hp["lr"])
+    m = ProbGRU(Xtr.shape[-1], len(vocab), int(hp["hidden"]), n_out=len(cfg.channels),
+                dropout=float(hp["dropout"])).to(dev)
+    opt = torch.optim.Adam(m.parameters(), lr=hp["lr"],
+                           weight_decay=float(hp["weight_decay"]))
     best, best_state, history = np.inf, None, {"train_nll": [], "val_nll": []}
     t0 = time.time()
     for ep in range(n_ep):
@@ -286,6 +297,8 @@ def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
     history["device"] = str(dev)
     history["features"] = str(hp.get("features", "raw"))
     history["n_features"] = int(Xtr.shape[-1])
+    history["weight_decay"] = float(hp["weight_decay"])
+    history["dropout"] = float(hp["dropout"])
     return m, norm, fnorm, vocab, by_idx, history
 
 

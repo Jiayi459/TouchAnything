@@ -152,3 +152,24 @@ def test_default_is_still_the_verbatim_five(cfg):
     _, _, fnorm, _, _, hist = P.train(cfg, ids[:8], ids[8:10], t_in=15,
                                       hp={"epochs": 1, "hidden": 8})
     assert fnorm.with_df is False and hist["n_features"] == 5
+
+
+def test_regularisers_are_off_by_default_and_reach_the_model(cfg):
+    """p=0 dropout must be an identity, or the 'verbatim architecture' claim is false."""
+    ids = list(range(12))
+    _, _, _, _, _, h0 = P.train(cfg, ids[:8], ids[8:10], t_in=15,
+                                hp={"epochs": 1, "hidden": 8})
+    assert h0["weight_decay"] == 0.0 and h0["dropout"] == 0.0
+
+    m = P.ProbGRU(5, 2, 8, dropout=0.0)
+    m.eval()
+    x = torch.randn(3, 15, 5); a = torch.zeros(3, dtype=torch.long); yl = torch.randn(3, 3)
+    m.train()                                  # dropout is active in train mode, if any
+    mu1, _ = m(x, a, yl, 4)
+    mu2, _ = m(x, a, yl, 4)
+    assert torch.allclose(mu1, mu2), "p=0 dropout must not perturb anything"
+
+    _, _, _, _, _, h1 = P.train(cfg, ids[:8], ids[8:10], t_in=15,
+                                hp={"epochs": 1, "hidden": 8, "weight_decay": 1e-3,
+                                    "dropout": 0.2})
+    assert h1["weight_decay"] == 1e-3 and h1["dropout"] == 0.2

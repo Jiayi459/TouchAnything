@@ -24,6 +24,7 @@ hedging with intervals wider than its errors, which is what the forecast plot su
 from __future__ import annotations
 
 import argparse
+import collections
 import glob
 import os
 
@@ -43,12 +44,22 @@ def load_ckpts(d):
 
 
 def coverage(preds_dir, k_sigma=2.0):
-    """Fraction of truths inside +-k sigma, and the ratio of typical sigma to typical error.
+    """Coverage and scale, POOLED and PER CHANNEL.
 
-    Both are needed: coverage alone cannot distinguish a well-sized interval from a wide one
-    that happens to sit in the right place, while the ratio alone ignores the mean's bias."""
+    Per channel is not a refinement, it is the point. F sits near 750,000 while CoP lives in
+    [-1,1], so a pooled median sigma is whatever the two CoP channels say and tells you
+    nothing about F -- and a pooled coverage can read 95% while one channel hedges and
+    another is overconfident, cancelling. The first version reported only the pooled number
+    and would have hidden exactly that.
+
+    Both statistics are kept: coverage alone cannot separate a well-sized interval from a
+    wide one that happens to sit in the right place, and the sigma-to-error ratio alone
+    ignores where the mean is. For Gaussian errors the ratio is 1/0.6745 = 1.48; materially
+    below that means the tails are heavier than the interval admits."""
     inside = tot = 0
     sig, err = [], []
+    per = collections.defaultdict(lambda: [0, 0, [], []])   # channel -> in, tot, sig, err
+    chans = None
     for p in sorted(glob.glob(os.path.join(preds_dir, "clip_*.npz"))):
         z = np.load(p, allow_pickle=True)
         if "sigma_prob_gru" not in z.files or "mu_prob_gru" not in z.files:
@@ -63,10 +74,20 @@ def coverage(preds_dir, k_sigma=2.0):
         d = np.abs(truth - mu)
         inside += int((d <= k_sigma * sd).sum()); tot += d.size
         sig.append(sd.ravel()); err.append(d.ravel())
+        if chans is None:
+            chans = [str(c) for c in z["channels"]] if "channels" in z.files else \
+                    [f"c{j}" for j in range(d.shape[-1])]
+        for j, c in enumerate(chans):
+            e = per[c]
+            e[0] += int((d[..., j] <= k_sigma * sd[..., j]).sum()); e[1] += d[..., j].size
+            e[2].append(sd[..., j].ravel()); e[3].append(d[..., j].ravel())
     if tot == 0:
         return None
+    by_ch = {c: (v[0] / max(v[1], 1), float(np.median(np.concatenate(v[2]))),
+                 float(np.median(np.concatenate(v[3]))))
+             for c, v in per.items()}
     return (inside / tot, float(np.median(np.concatenate(sig))),
-            float(np.median(np.concatenate(err))))
+            float(np.median(np.concatenate(err))), by_ch)
 
 
 def main():
@@ -123,16 +144,22 @@ def main():
 
     cov = coverage(a.preds)
     if cov:
-        frac, msig, merr = cov
+        frac, msig, merr, by_ch = cov
         fig.suptitle(f"±2σ coverage {frac:.1%} (nominal 95.4%) | median σ {msig:.4g} vs "
                      f"median |error| {merr:.4g}  (ratio {msig / max(merr, 1e-9):.2f})",
                      fontsize=10)
         print(f"±2 sigma coverage: {frac:.2%} (nominal 95.4%)")
         print(f"median sigma {msig:.1f} | median |error| {merr:.1f} "
               f"| ratio {msig / max(merr, 1e-9):.2f}")
-        print("Coverage far above nominal, with sigma several times the typical error, "
-              "means the head is hedging: intervals wider than the mistakes it makes. "
-              "The harness never scores this, so nothing else would have caught it.")
+        print(f"\n{'channel':10s} {'±2σ cov':>9s} {'median σ':>12s} "
+              f"{'median |err|':>13s} {'σ/|err|':>8s}")
+        for c, (f_, s_, e_) in by_ch.items():
+            print(f"{c:10s} {f_:9.2%} {s_:12.5g} {e_:13.5g} {s_ / max(e_, 1e-12):8.2f}")
+        print("Gaussian errors give σ/|err| = 1.48 and 95.4% coverage. Above -> the head "
+              "hedges with intervals wider than its mistakes; below -> it is overconfident. "
+              "The harness scores point error only, so neither shows up anywhere else, and "
+              "the pooled row cannot separate the channels: F and CoP differ by orders of "
+              "magnitude, so a pooled median is whatever CoP says.")
     fig.tight_layout(rect=(0, 0, 1, 0.93 if cov else 1.0))
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
     fig.savefig(a.out, dpi=140)

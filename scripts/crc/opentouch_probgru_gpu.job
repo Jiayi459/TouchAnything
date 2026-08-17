@@ -61,6 +61,8 @@ python -u scripts/run_opentouch_exploratory.py \
     ${SAVE_PREDS:+--save-preds "$SAVE_PREDS"} \
     ${SAVE_MODEL:+--save-model "$SAVE_MODEL"} \
     ${FEATURES:+--features "$FEATURES"} \
+    ${WEIGHT_DECAY:+--weight-decay "$WEIGHT_DECAY"} \
+    ${DROPOUT:+--dropout "$DROPOUT"} \
     ${EPOCHS:+--epochs "$EPOCHS"} \
     ${HISTORIES:+--histories "$HISTORIES"} \
     ${MAX_CLIPS:+--max-clips "$MAX_CLIPS"} \

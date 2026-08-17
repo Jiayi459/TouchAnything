@@ -149,8 +149,9 @@ def main():
                      f"median |error| {merr:.4g}  (ratio {msig / max(merr, 1e-9):.2f})",
                      fontsize=10)
         print(f"±2 sigma coverage: {frac:.2%} (nominal 95.4%)")
-        print(f"median sigma {msig:.1f} | median |error| {merr:.1f} "
-              f"| ratio {msig / max(merr, 1e-9):.2f}")
+        print(f"median sigma {msig:.5g} | median |error| {merr:.5g} "
+              f"| ratio {msig / max(merr, 1e-9):.2f}   (pooled: dominated by whichever "
+              f"channel has the smaller scale -- read the per-channel table below)")
         print(f"\n{'channel':10s} {'±2σ cov':>9s} {'median σ':>12s} "
               f"{'median |err|':>13s} {'σ/|err|':>8s}")
         for c, (f_, s_, e_) in by_ch.items():

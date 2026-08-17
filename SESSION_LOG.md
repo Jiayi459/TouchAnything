@@ -3649,3 +3649,1199 @@ done:   26 / 26   FAILED: none    (failed_own_ids.txt 为空)
 2. **再请用户裁定 OQ-J / OQ-L / OQ-M / OQ-N**。SESSION_LOG 已明确记录:OQ-L/OQ-M 若要改,
    **必须在看到任何 G2 数字之前改**,否则就成了 post-hoc。因此**在用户签字前不跑 G2 探索版**,
    哪怕它技术上现在就能跑。OQ-K(G2 分层轴)与 splits.py 的 split 轴耦合,可以等 splits 一起定。
+
+### 2026-08-13续2 — recount 报 ModuleNotFoundError:根因是阶段 1 代码从未推送;已 commit + push
+
+用户在 CRC 上跑重数脚本报 `ModuleNotFoundError: No module named 'src.opentouch'`。排查:
+本地 `git status -sb` 显示 **main 领先 origin/main 2 个 commit**——`e60d299`(阶段 1:trait.py /
+metrics / bootstrap / GRU-aggregate fork)和 `8084640`(test_tactile_map torch 守卫)**只在本地**,
+CRC 是从 GitHub 拉的,自然没有这些文件。**不是环境或 sys.path 问题。**
+
+处置(用户在三个选项中选择"commit + push + CRC 上 git pull",理由是保持 CRC 与 git 历史一致、
+可复现):
+- 新 commit `25129bf`:`download_own_copies.sh` 的文件名列修复 + `data/own_copy_ids_full.txt`
+  + 本会话的 SESSION_LOG。commit message 完整记录了两个 bug 的机制与本地测试结果。
+- `git push origin main` 成功(`8687440..25129bf`),三个 commit 全部上到 fork。
+- CRC 拉取时的坑:此前 scp 过去的 `download_own_copies.sh` 相对旧 HEAD 算本地修改,会挡住
+  pull;其内容与新 commit **完全一致**(scp 发生在全部编辑与测试之后),故指示用户
+  `git checkout -- scripts/crc/download_own_copies.sh` 后再 pull,无内容损失。
+
+**顺带的收尾建议(已告知用户)**:26/26 已安全落在 CRC,Google Drive 的
+`opentouch_own_copies_v2` 文件夹**应取消公开共享**。刚推送到 GitHub fork 的 ID 清单在取消
+共享后即成为无效链接,既避免陌生人消耗用户账号配额,也降低把可下载链接留在公开仓库的暴露面。
+CRC 上的数据不受影响。
+
+### 2026-08-13续3 — 真实 manifest 的重数结果:冻结词表覆盖不全,且类别极度不平衡(阻塞 G2)
+
+CRC pull 到 `25129bf` 后重跑重数(纯计数,无任何 R²/模型输出)。**脚本在 `lifting` 处按设计
+中止**——`trait.trait_class` 抛 `UnauditedAction`,守卫正确阻止了未裁定动作进入打分。这不是
+bug,是预注册保护起作用。
+
+**真实数字(vs 2026-08-11 引用的旧数 108/2,850,后者来自 join bug 修复前):**
+```
+smooth 233 | abrupt 2393 | contentious 728 | unclassified 278   (合计 2904 ✓)
+```
+**三个必须在任何 G2 数字之前解决的问题:**
+1. **冻结的 30 词审计表没覆盖真实语料**:36 个动作词从未审计,共 278 clip(9.6%)。词表:
+   aligning, attaching, bending, connecting, detaching, dropping, examining, feeling, folding,
+   inserting, lifting, measuring, passing, pinching, plugging in, pointing, probing,
+   resting hand, rotating, scanning, screwing, scrolling, spraying, switching off/on, taping,
+   tapping, testing, tightening, tilting, twisting, typing, unfolding, unplugging, unscrewing,
+   zipping。其中若干(rotating/twisting/folding/scrolling)按 rubric 很可能落 smooth,直接影响
+   smooth 类的规模。
+2. **类别极度不平衡:smooth 233 vs abrupt 2393 ≈ 1:10**。旧数字给人的印象(108 vs 2,850)虽也
+   不平衡,但当时 smooth 更小;现在 smooth 主要由 holding(115)+sliding(53)撑着。这直接影响
+   G2 的统计功效和 stratified bootstrap 的分层设计(OQ-K)。
+3. **争议子集 728 clip > 整个 smooth 类 233**。第三层敏感性分析的设计是"剔除争议子集重算",
+   但当被剔除的比主类还大时,该设计的解释力需要重新审视——pulling(245)/pushing(154)/
+   adjusting(88)/turning(84)/moving(78)/inspecting(29) 六个 DISPUTED 全在 abrupt 侧,合计 678。
+
+**已发现的 per-action 计数(截至中止点)**:picking up 951, placing 249, pulling 245[D],
+pressing 233, pushing 154[D], holding 115(smooth), grasping 107, adjusting 88[D], turning 84[D],
+moving 78[D], touching 78, removing 55, sliding 53(smooth), inspecting 29[D]。
+
+**状态:仍未跑任何 G2 数字(正确)。**下一步:用容错版脚本取回完整 per-action 表(未审计者标
+UNAUDITED 而非抛异常),然后与用户一并裁定:36 词的 rubric 补裁、不平衡对 G2 的影响、争议子集
+大于主类时敏感性分析是否还成立。原有的 OQ-J/L/M/N 仍未裁定,且 OQ-L/OQ-M 的论证依赖的旧数字
+(684)现已被真实数据取代(六个 DISPUTED 实为 678)。
+
+### 2026-08-13续4 — 用户确认三步走计划;数据格式核实;新增 OpenTouch F/CoP 绘图脚本
+
+**用户的计划(原话转述)**:1) 按动作类型分 smooth/abrupt(明确:**只分两类**);2) split data
+开始 training;3) 训练后用 R² 算 metrics。并要求先列出所有动作及各自 clip 数,再确认数据格式、
+画 F/CoP 随时间的变化。
+
+**计划与既有设计的对照(我的核实结果)**:三步与 2026-08-11 的 G1/G2 计划一致,无冲突。
+"只分两类"也与冻结设计相符——**争议子集(contentious)不是第三类**,而是第三层敏感性分析的标记,
+两类划分不受影响。两个前置阻塞仍在:(a) 36 个动作词未审计(278 clip)导致第 1 步无法完成;
+(b) `splits.py` 未解决,第 2 步的正式 split 轴仍未定(OQ-K 的分层轴与之耦合)。
+
+**数据格式核实(读 `scripts/extract_opentouch.py` 确认,不是推测)**:
+- **F 和 CoP 已在抽取时算好**,无需再碰 hdf5(hdf5 已随流式下载删除)。
+- `state_<N>.npy` 形状 `(T, 1, 6)` = `[F, CoPx, CoPy, sxx, syy, sxy]`;hand 轴 extent=1
+  (OpenTouch 只instrument右手,保留该轴是为了与 ActionSense 的 harness 索引完全一致)。
+- `clip_<N>.npy` `(T,1,16,16)` float16 原始压力也在 cache 里;`pose_<N>.npy` 可能缺失。
+- CoP 坐标归一化到 `[-1,1]`;16×16 中仅 169 个活 taxel,死格读数≈0 对矩不贡献权重,
+  故 F/CoP 无需 mask(但任何 per-taxel 统计需要)。
+- **未做 baseline correction**(刻意推迟:clip 围绕压力峰切分,前 N 帧可能已在接触中)。
+- manifest 每条含 `fps_est`、`onset_idx`/`peak_idx`/`post_idx`,可直接用于时间轴与事件标注。
+
+**新增 `scripts/plot_opentouch_fcop.py`(commit `bfff4cf`,已推送)**:行=clip(标注 action/
+object),列=F / CoP-x / CoP-y,并画出 onset/peak/post 竖线使事件结构可见。已用合成 cache
+本地测通(含"动作不存在时列出可用动作"的错误路径)。**docstring 里写死了一条约束**:这是
+Layer-2 验证,**不得用于重新分类动作**,否则类别定义就成了它后来要解释的那份数据的函数。
+理由:用户自己在 2026-08-12 对 Q3 的裁定即"②量化 manipulation check(后验验证,**不用于重新
+分类**)"。因此**建议顺序**:先用 rubric 补裁 36 个词(纯语义、先验)→ 再画图验证 → 最后跑 G2。
+若用户希望先画图探索,那也可以,但必须在日志里明确记录该顺序,并且分类仍须严格由 rubric 决定。
+
+**仍未跑任何 G2 数字。**待用户跑容错版重数脚本给出完整 per-action 表(我无 CRC 访问权限,
+无法自行读取 manifest)。
+
+### 2026-08-13续5 — 新增原始 tactile map 绘图脚本(commit `4495425`,已推送)
+
+用户要求画出与 F/CoP 同一批 clip 的**原始 tactile map**。核实:`clip_<N>.npy` `(T,1,16,16)`
+float16 原始压力确实在 cache 里(`download_own_copies.sh` 调用 `extract_opentouch.py` 时未加
+`--no-clips`;cache 232MB 的体量也与"2904 clip × 约 43KB 原始 map + state + pose"吻合),
+因此**无需重新下载 hdf5**。现有 `scripts/plot_tactile_map.py` 画的是 CV 结果表、不是 map,
+不可复用。
+
+**`scripts/plot_opentouch_tactile_map.py`**:行=clip,列=帧(等距 N 帧 ∪ onset/peak/post,
+peak 列标题标红),每帧 `imshow` 16×16 压力场并叠加**青色 CoP 圈**;逐 clip 用 99.5 分位数作
+色标上限(防单个热 taxel 压平整个场)。**clip 选取直接 import 自 `plot_opentouch_fcop.py` 的
+`pick()`/`load_manifest()` 而非重写**,保证 `--actions/--n` 选到的是同一批 clip、两张图能对上;
+也支持 `--idx`(取前一个脚本打印的索引)。缺 `clip_<N>.npy` 时给出原因(`--no-clips` 抽取)而非
+裸 FileNotFoundError。
+
+**CoP 叠加的坐标约定**(依据 `extract_opentouch.moments()` 逐行核对,写进 docstring):
+`cx` 加权 `xs=linspace(-1,1,W)` 沿**列**轴、`cy` 加权 `ys=linspace(-1,1,H)` 沿**行**轴,故
+`col=(cx+1)/2*(W-1)`、`row=(cy+1)/2*(H-1)`,配合 imshow 默认 `origin="upper"`。
+**验证**:用合成 cache(其 state 由 `moments()` 的同一套数学独立算出)测试,青色圈在每一帧都
+精确落在压力团中心 → 坐标映射正确,不是"看起来差不多"。同时测通 `--idx` 路径与缺文件报错路径。
+
+**约束不变**:该脚本同样是 Layer-2 验证,docstring 明确写明**不得用于重新分类动作**。
+**仍未跑任何 G2 数字。**36 个未审计动作词的补裁仍是第 1 步的阻塞项。
+
+### 2026-08-13续6 — 传感器/标注语义的权威核实(论文),并发现 peak_idx 基准可能错位(待诊断)
+
+用户看图后提问:深浅代表什么、16×16 对应手的哪些部位、F 怎么算、peak/onset 是什么、
+为什么 peak 那帧反而很浅。**从论文(arXiv:2512.16842 全文 HTML)核实**,不是推测:
+- 硬件:**169 个 taxel,覆盖手指 + 掌侧面**(不只是手掌);16×16 电极栅格 + 商用压阻薄膜;
+  **30 Hz**;标定范围 **0.02–50 kPa**,超出会饱和。169 与我们抽取代码记录的"169 live taxels"
+  **完全吻合**(交叉验证成立);256-169=87 个格子恒为 0,即图上永远发黑的部分。
+  **论文未给出"哪个格子对应哪根手指"的映射表** —— 可由 `--taxel-stats` 实测活跃度分布推断。
+- `F = p.clip(0).sum(axis=(1,2))`,是**压强总和的代理量,不是牛顿**;无面积加权、无标定、
+  **无 baseline 扣除**(刻意推迟)。CoP 为压强加权重心,归一化到 [-1,1]。
+- 标注三索引的论文定义:`onset_idx`=peak 前压力最低(approach);`peak_idx`=**压力峰值**
+  (manipulation);`post_idx`=peak 后压力最低(release)。
+- 绘图色标是**逐 clip** 99.5 分位数归一 → **行内可比,行间不可比**(已向用户说明)。
+
+**发现的疑点(可能是真 bug,尚未确证)**:按论文定义,`peak_idx` 那一帧应当是整段**最亮**的,
+与用户观察相反。`extract_opentouch.py:262` 把 `peak_idx`/`onset_idx`/`post_idx` **从标注 CSV
+原样抄入 manifest,未做任何重新基准化**;而 clip 与标注行是靠**时间戳重叠**匹配的,两者起点
+不必对齐。若 CSV 中的索引相对于原始录制流(或标注窗口)而非我们切出的 clip,则它是错位索引,
+`plot_opentouch_tactile_map.py` / `plot_opentouch_fcop.py` 画的竖线位置就是错的,且**任何后续
+用 onset/peak/post 做窗口切分的分析都会被污染**。
+
+**已给用户决定性诊断命令**:对前 600 条 clip 比对 `peak_idx` 与 `argmax(F)` 的帧距,并统计
+越界比例。判读标准:差≤2 帧占绝大多数 → 索引为 clip 本地、图无误,"peak 浅"是信号真实现象;
+中位差很大或大量越界 → 基准错位,必须修绘图脚本并复查所有依赖该索引的下游逻辑。
+**结果未知,等待用户运行。在确证之前不修改代码(避免按猜测改)。**
+
+### 2026-08-13续7 — peak_idx 疑点排除(我的怀疑是错的);"peak 帧偏暗"的真实成因
+
+**诊断结果(用户在 CRC 运行,600 条 clip)**:
+```
+peak_idx 在 [0,T) 内: 600 | 越界: 0
+|peak_idx - argmax(F)|: 中位 0.0 均值 0.0 最大 0 | 完全一致 100.0%
+```
+**`peak_idx` 与 `argmax(F)` 逐帧精确相等,零越界。续6 中"索引可能相对原始录制流而错位"的怀疑
+被证伪,现予撤回。**标注索引是 clip 本地的,两个绘图脚本的竖线位置一直是对的,无需修改。
+(教训:该疑点提出时即标注为"待确证、在确证前不改代码",这个处理方式是对的——若当时按猜测
+"修复",反而会把正确的索引改坏。)
+
+**"peak 帧看起来更暗"的真实成因(物理解释,非 bug)**:`F = Σ_taxels p`,是**空间求和**,
+不是单格最大值。总力取峰值可以来自**接触面积铺开**(整掌+手指轻压,每格值不高但格子多),
+而指尖单点重压会产生极亮的单格却给不出大的 F。又因绘图色标上限取该 clip **全部帧**的 99.5
+分位数,只要 clip 内存在某个集中受力瞬间,vmax 就被抬高,于是"面积大但每格不亮"的 peak 帧
+显得偏暗。
+**对项目的实质含义:模型预测的 F 是空间聚合量,其峰值与视觉上最亮的 map 不是同一回事。**
+这一点在解释 G1/G2 结果时需要记住(例如"预测 F 好"不等于"预测接触模式好")。
+
+**改进(commit `f797f19`,已推送)**:`plot_opentouch_tactile_map.py` 现在把每帧的 **F 值和
+受载格子数 n**(>5% 色标上限)直接印在该帧标题上,并加大行距避免标题与上一行图重叠。这样
+"F 最大但看起来暗"是可读的事实,而不需要用眼睛推断。已用合成 cache 重新渲染验证版式。
+
+**已给用户的下一步验证命令**:对 8 条 clip 对比"peak 帧"与"单格最亮帧"的 F/maxcell/面积,
+若 peak 帧面积显著更大而 maxcell 更小,则上述解释在真实数据上成立。
+
+### 2026-08-13续6 — probGRU 预测流程图的设计方案(计划,未实现)
+
+**用户要求**:仿照参考论文 Fig.2(object embedding | forward prediction 双栏示意图),画出我们
+prediction pipeline 的预测模型图,**明确表示 input history / probGRU / output**;要求我先设计
+"该包含哪些内容、怎么排列"。
+
+**我锁定的建模对象(核实过代码,不是推测)**:`ProbGRU`
+([action_dynamics.py:142](src/actionsense/action_dynamics.py#L142))。逐行确认的结构事实:
+1. 编码器 `enc = nn.GRU(din, hid)`,`din` = 6(highpass:`[F_fast,x_fast,y_fast,F_slow,vx,vy]`)
+   或 5(raw:`[F,x,y,vx,vy]`);`hid=48`。
+2. 解码器 `dec = nn.GRU(3, hid)`,**输入维度是 3(fast target),不是 din**;`h` 由编码器末态初始化。
+3. **自回归 rollout**:`inp = mu.unsqueeze(1)`([:161](src/actionsense/action_dynamics.py#L161)),
+   每步把自己的预测均值喂回去,**不是 one-shot**。这是它与另外两个变体的关键区别。
+4. **action embedding 在 head 处 concat,不在 GRU 输入处**:`oc = torch.cat([o[:,-1], e], -1)`
+   ([:158](src/actionsense/action_dynamics.py#L158)),`emb = nn.Embedding(n_act, 8)`。
+5. 双 head:`mu`(3) 与 `lv`(3),`lv.clamp(-6,4)`。训练 Gaussian NLL;VAL NLL 早停;
+   事后 `calibrate_sigma` 标量缩放使 coverage@2σ→0.95。
+6. seed 帧是 `y_last = norm.ny(Yin)[:,-1]`,即**最后一帧已观测的 fast target**。
+7. 预处理:30 Hz →`ds=3`→ 10 Hz;`cut=0.4 Hz` 二阶 Butterworth **因果** `sosfilt`;
+   丢弃前 `warmup_sec=5 s` 瞬态;`t_in ∈ {1,2,3,5,10} s`;`t_out = 1 s = 10 步`。
+
+**图的内容清单(两栏,仿 Fig.2)**
+
+(a) 左栏「因果特征构造」——**替代**参考图的 object-embedding 栏。理由:参考图那栏之所以独立成栏,
+是因为 embedding 由对比损失学出来、是方法贡献;我们的 action embedding 只是 4 个离散动作 id 的
+查表(8 维),**独立成栏会严重夸大它**。我们真正对应"方法贡献"的是 causal slow/fast 分解
+(因果性修正曾把 skill 从 +0.70 拉回 +0.40,是项目最重要的方法结论之一)。故左栏内容:
+tactile map →(离线、非学习的 `physical_state`)→ s_t=[F,x̄,ȳ] → 降采样 10 Hz → 因果低通
+0.4 Hz → slow/fast 分流 → 特征 x_t(D=6)与目标 y_t(3);标注"丢弃前 5 s 瞬态"。
+action label → Embedding → e_a(8) 作为**小侧输入**画在左栏底部,箭头引向右栏的 head。
+
+(b) 右栏「概率性 rollout」——三段式,时间一律左→右:
+  B1 历史块:t_in 帧特征列向量堆 → Encoder GRU(48) → h_t;下方叠一条 3 通道 fast 信号缩略曲线。
+  B2 解码链:3 个解码 cell + "…",h 左→右传递;**虚线弯箭头**表示 μ 回喂(自回归);e_a 从下方
+  扇出**只进 head 框**(不进 GRU cell)——这条必须画对,否则与代码不符。
+  B3 输出:μ 曲线 + ±2σ 带 + 真值 + persistence 灰虚线;标注 skill 与"报告 R² vs mean"。
+  贯穿全高的粗虚线 = 预测原点 t(左=已观测,右=待预测),这是全图最重要的一条线。
+  底部细条:Gaussian NLL → VAL NLL 早停 → σ 标定(coverage@2σ→0.95) → 5-fold CV by clip。
+
+**刻意不画的东西(避免不诚实)**:(i) 不能画成"tactile map 直接进网络"——probGRU 吃的是 6 维
+state,不是 map(参考图是 map 进 encoder,照抄就是错的);(ii) 不画 one-shot head(那是
+tactile_map/models.py 和 opentouch/gru_aggregate.py 的结构,不是 probGRU);(iii) 不把
+persistence 画成模型的一部分,它是基线。
+
+**OPEN QUESTIONS(待用户裁定,未定前不动手实现)**
+- **OQ-P1 画哪个模型?** (1) ActionSense probGRU(上述,自回归+概率头);(2) OpenTouch
+  `Seq2SeqPoint`(确定性、one-shot、residual-over-persistence,是当前 G1/G2 的在用模型);
+  (3) 一张图统一表示、用分支标注差异。用户说"probGRU"→默认 (1),但当前活跃工作在 OpenTouch,
+  需确认这张图是给哪份稿子用。
+- **OQ-P2 产出格式?** matplotlib 脚本(可复现、进 `scripts/`)/ TikZ(投稿最清晰)/ SVG。
+- **OQ-P3 范围?** 是否含左栏 (a) 与底部训练条,还是只画 input→probGRU→output 的最小版。
+- **OQ-P4 版面?** 双栏 7in×2.9in(仿 Fig.2)还是单栏窄图。
+
+### 2026-08-13续8 — 【重大】真实 tactile map 图暴露两个问题:F 被直流偏置主导、10/26 shard 标注疑似错配
+
+用户把 `docs/opentouch_tactile_map.png` 取回本地,Claude 直接读图分析(不再靠转述)。
+
+**问题 1:F 中 95%+ 是直流偏置,CoP 近乎失效。**
+- 每帧 F ≈ 700,000–770,000,**整段变化幅度仅约基线的 ±4%**;平均每格读数 ≈ 750000/256 ≈ 2930。
+- `n=256`(所有格子都在色标 5% 以上)**包括本应是"死格"的 87 个** → docstring 里"dead cells
+  read ~0"的假设在真实数据上**不成立**。图面大片饱和于 magma 高值端,仅零星暗格。
+- **CoP 的青色圈在所有帧、所有 clip 上都钉在正中央几乎不动** —— 均匀场的压强加权重心必然趋于
+  几何中心。**当前 CoP 携带的接触位置信息极少。**
+- 因此"peak 帧看起来和别帧无异"是必然的:真实接触信号只占 1–5%,被基线淹没。
+- **续7 中给出的"F 是空间求和、面积铺开导致 peak 帧偏暗"的解释虽然在物理上成立,但不是本图的
+  主因;主因是直流偏置。该解释的适用性被本次实测修正。**
+- `extract_opentouch.py` docstring 明确写着 baseline correction 被**刻意推迟**,待 `--taxel-stats`
+  测出静息水平后再定。**本图即该测量:基线不是小偏移而是主导项,这个决定现在必须做。**
+  影响面:预测一个 95% 为常数的信号会让 persistence 天然占优、R² 虚高 —— 正是 OQ-J 中
+  "SST 被 clip 间水平差主导"担忧的极端形态。
+
+**问题 2:10/26 个 shard 的 `peak_idx` 与 `argmax(F)` 不一致(用户全量诊断结果)。**
+```
+office_ml_p2      271  100.0%      sports_dicks_p1   90  92.2% (最大差 68 帧)
+sports_dicks_p2   102   70.6% (最大差 81 帧)        有不一致的 shard: 10 / 26
+```
+`sports_dicks_p1/p2` 正是 docstring 点名的**共用同一份 CSV** 的那一对。**关键推论**:若不一致
+源于 clip 认领了错误的标注行,则错的不只是 peak 位置,**`action` 标签同样是错的**;而 action
+是 smooth/abrupt 分类的唯一依据 → 直接污染 G2。**我此前"前 600 条 100% 一致"的诊断因只取
+manifest 前 600 条(未覆盖被绘图选中的 clip)而不具代表性,该方法学缺陷已向用户承认。**
+
+**已给用户三段式诊断命令**:(A) 逐 clip 的 raw 分位数 + 扣基线(每格 5 分位)前后 F 的变异系数
+与 argmax 变化;(B) 扣基线前后 CoP 的活动范围;(C) peak 不一致率按 manifest 的 `join` 方式交叉
+分组,以定位标签错配机制。
+
+**状态:未改任何代码。**baseline correction 怎么扣(每格 5 分位 / 前 N 帧 / 全局)是需要用户拍板的
+方法学决定,且必须在看到任何 G2 数字之前定死,否则又是 post-hoc。G1/G2 在此之前不得启动。
+
+### 2026-08-13续9 — 待决事项清单(应用户要求)与 Claude 的建议
+
+**时间敏感警告(已置顶告知用户)**:**暂缓删除 Drive 副本、暂缓取消共享**。若 D2 确认标签错配,
+修复需重新抽取受影响 shard,而时间戳只存在于原始 hdf5(cache 未保存),即需**重新下载那 10 个
+shard**。清理须等全部定稿之后。
+
+**第 0 层——数据本身(最先,因其改变数据):**
+- **D1 baseline correction 做不做/怎么做。** 建议:**必须做**;方案倾向**按 shard(≈一次录制
+  session)估计每 taxel 静息水平**(该 shard 全部帧的 5% 分位),逐格扣除并截断到 0。理由:clip
+  围绕压力峰切分,**单 clip 内可能全程在接触**,用 clip 内分位会连真实接触一起扣掉(docstring
+  原已警告);shard 级样本量大得多。同时**需重新识别死格**("死格读 0"假设已被证伪,改用
+  "时间方差≈0"定义)。**不需要重新下载**——`clip_*.npy` 全在 cache,F/CoP 可直接重算。
+- **D2 10/26 shard 标注错配的处置。** 建议:若确认为 join bug 则**修 join,不丢 shard**
+  (丢 10/26 ≈ 丢 40% 语料);代价是那些 shard 需重新下载+重抽。并建议**把每 clip 的
+  ts_start/ts_end 写入 manifest**,使此类问题今后可直接从 cache 审计。
+
+**第 1 层——类别定义(必须在任何 G2 数字之前):**
+- **D3 36 个未审计动作词(278 clip)的 rubric 补裁**:建议现在就逐词裁定(Claude 给依据、用户
+  签字)。`rotating/twisting/folding/scrolling/typing` 等很可能落 smooth,而 smooth 现仅 233,
+  补裁可能显著改变类规模。
+- **D4 1:10 不平衡 + 争议子集(728) > smooth 类(233)**:建议**不做人为再平衡**(下采样丢数据);
+  并把第三层从"剔除争议子集"改为"**全量 / 仅无争议 两张并列表**",使结论对争议裁定的依赖程度
+  可见,而非只给剔除后的单一数字。
+- **D7 OQ-L/OQ-M 签字**:维持 Claude 的 rubric 推论,但裁定权在用户(OQ-L 与 2026-08-07 旧集合
+  相反)。OQ-M 的"684"已被真实数据取代,实为 678。
+
+**第 2 层——指标与统计:**
+- **D5 OQ-J(class_mean vs clip_mean)**:建议**等 D1 完成后再定**(扣基线后"clip 间水平差主导
+  SST"会大幅缓解);无论如何建议两者**并列主表**。
+- **D8 OQ-N**:建议**不加** pooled-mean 第三诊断,但在论文写明解释性限制。
+- **D6 OQ-K 分层轴**:与 D9 的 split 轴一起定,现在不单独决策。
+- **D9 splits.py 的 split 轴**:建议**按 scene 或 participant 留出**(manifest 有 `scene`/
+  `environment`),**绝不可随机切 clip**(同场景同物体的 clip 高度相关,随机切严重泄漏)。
+
+**建议执行顺序**:D2 定性 → D1 定方案并重算 → D3/D7 签字 → D4 定报表形式 → D9/D6 定 split
+→ D5/D8 定指标 → 才跑 G1/G2。**最划算的起步是 D1**(无需重新下载,只用 cache 重算),且做完后
+D5 的判断会自然清晰。已提议先写"扣基线前后对照"的**纯描述性**分析脚本(只出统计与图,
+不出任何 R²),供用户看过效果再定正式方案。**等待用户指示从哪一项开始。**
+
+**OPEN QUESTIONS 已裁定(用户,2026-08-13)**:OQ-P1 = **ActionSense probGRU**;OQ-P2 = **matplotlib
+脚本**;OQ-P3 = **完整双栏(含左栏 (a) 与底部训练条)**;OQ-P4 随之取双栏宽版面。
+
+**实现:`scripts/plot_model_diagram.py`** → `docs/model_diagram.png` + `.pdf`(矢量,投稿用)。
+纯绘图脚本,不读数据、不依赖 cache,任何机器上都能跑。
+
+*版面*:统一绘图坐标 130×56(figsize 13×5.6,比例 2.32),`ax.add_axes([0,0,1,1])`,inset 用
+`x/W, y/H` 直接换算,故所有元素(含两张 inset 曲线)共用一套坐标,改一个数就整体对齐。
+
+*落实的设计决定*:
+- 预测原点 t 的粗虚线贯穿 y=10.8..50.5(**刻意不穿过底部训练条**,否则像把协议也切成两半)。
+- `e_a` 用**参考图 Fig.2 的惯例**:在每个 head 旁重画一个小深蓝条,而不是画一条总线——既避免
+  与 decoder cell 的走线打架,也把"concat 发生在 head 而非 GRU 输入"画对了。
+- 自回归回喂用**橙色虚线弧**从 head_k 绕到 cell_{k+1} 底部,与实线的 h 传递明确区分。
+- 左栏 → 右栏有两条蓝色曲线箭头分别标 **x**(进特征条)与 **y**(进观测目标曲线),明确区分
+  "编码器输入(6 维)"与"目标/seed(3 维)"这两个不同的量;这一区分在代码里就是
+  `enc = GRU(din,...)` 与 `dec = GRU(3,...)` 的维度差。
+
+*诚实性措施(写在画布上,不只写在 docstring 里)*:
+- 右上角固定注记 **"inset curves are illustrative, not measured"**——两条曲线是定种子合成的
+  示意信号,不是实验数据。
+- 但示意曲线的**形状是真的**:μ 用 `true * linspace(0.85,0.35)` 表现 NLL 训练的**幅度向均值收缩**,
+  σ 随 horizon 增大;二者都是 5.4/5.5 节记录的真实性质。输出小图下方直接写
+  "skill = 1−MSE/MSE_pers **(report R² vs mean)**",把 5.5 节"skill-vs-persistence 结构性虚高"
+  的结论带进图里,避免图本身诱导读者只看 skill。
+- docstring 顶部列出"**刻意不画**"三条:(i) map 直接进学习型 encoder(probGRU 吃 6 维 state,
+  照抄参考图就是错的);(ii) one-shot head(那是 tactile_map/models.py 与 gru_aggregate.py);
+  (iii) persistence 作为模型的一部分(它是基线,只出现在输出小图里)。
+
+*未做*:未提交(等用户看过图再定);未把该图挂进 PROJECT_CONCLUSIONS.md 的图目录。
+
+### 2026-08-13续10 — 用户要求"先不解决那些问题,直接跑一遍预测(probGRU)";已提供探索性驱动
+
+**两处必须先澄清的事实(已告知用户)**:
+1. **OpenTouch 侧不存在 probGRU。** `src/opentouch/gru_aggregate.py` 是**确定性点预测**,概率头
+   是依据用户自己 2026-08-11 对 **OQ-G** 的裁定("GRU-aggregate 用点预测")被**刻意删除**的
+   (文件内注明理由:"从不被概率性评分的概率头是不可证伪的装饰")。probGRU 属于 ActionSense。
+   要跑概率版必须先推翻 OQ-G。
+2. **split 是不可用的占位符**:`configs/opentouch/eval_harness.yaml` 的 split 块写明
+   `PLACEHOLDER -- NOT YET FUNCTIONAL`、`splits.py does not exist`、`DO NOT wire into
+   evaluate.py`;`evaluate.main()` 故意抛 NotImplementedError。但 `fit_and_forecast()` /
+   `build_rows()` / `score_external()` 在**调用方提供 splits** 时均可用(该 fork 的设计即
+   "由调用方传 id 列表"),故无需 splits.py 也能跑探索版。
+
+**污染控制(Claude 的设计选择,已向用户说明)**:本次运行**不做 smooth/abrupt 分组**,只对全量
+语料打分。理由:trait 裁定(36 个未审计词、OQ-L/OQ-M 未签字)必须在**看到任何按类数字之前**冻结;
+不分类就不可能污染它们,同时仍满足"跑一遍看看 pipeline 通不通"的诉求。
+
+**`scripts/run_opentouch_exploratory.py`(commit `463ae10`,已推送)**:
+- **按 group 整组留出**(默认 `scene`),不按 clip 随机切——同一 scene 的 clip 共享环境、物体与
+  个人习惯,clip 级随机切会把近重复样本分到两侧、虚高所有分数。这是 splits.py 被阻塞期间**最弱
+  但可辩护**的替代,**不等价于**真正的 split。
+- **不修改冻结配置**:`config_hash` 就是该 yaml 的文件哈希,改它重定向 `states_root` 会静默破坏
+  与历史运行的可比性。改用软链接:`ln -s ~/opentouch/cache data/opentouch_states`。
+- 每行 CSV 与结尾横幅都带 `exploratory=True` 与 split 标签,防止日后被误当作 harness 结果。
+- 结尾明确提示:**F 受直流偏置主导(D1 未决)**,故这些数字会因与动态无关的原因偏袒 persistence。
+- **本地验证**(合成 cache,60 clip/6 scene → 40/10/10;本机 torch 半装故只测 baseline 路径):
+  三个 baseline 全部 fit/score/落盘正常,CSV 1395 行,汇总表与 skill 表打印正确。
+
+**待用户在 CRC 执行**;GRU 路径(60 epochs × 3 history)在前端节点较重,建议先 `--skip-gru`
+拿 baseline,再用小 `--epochs`/`--max-clips` 冒烟,最后视情况走 qsub GPU 作业跑全量。
+
+### 2026-08-13续11 — 核实用户回忆:ActionSense 确实去掉了 baseline,但机制是频率分解而非片段筛选
+
+用户提出"记得 ActionSense 的 training input 筛掉了变化不大的部分、只留波动高的部分",要求确认。
+**逐行读代码核实结果:结论方向正确,但机制需更正。**
+
+**没有任何按方差筛选 clip/窗口的逻辑**:`action_dynamics.load_pooled()` 只过滤 `min_len>=20` 帧,
+`windows()` 按 stride 取遍每个滑窗。实际做的是**对每路信号做因果频率分解**:
+- `slow_fast(sig,fps,cut)`:**因果** 2 阶 Butterworth 低通(仅前向 `sosfilt`,**刻意不用
+  filtfilt**,否则泄漏未来),`slow`=低通输出,**`fast = sig - slow`**;CLI 默认 `--cut 0.4` Hz。
+- **`TARGETS = ("F_fast","x_fast","y_fast")` —— 预测目标恒为 fast**,与 input_mode 无关
+  (docstring: "target: always fast")。**这就是"去掉 baseline"的实际含义。**
+- 输入是独立开关:`highpass` → `[F_fast,x_fast,y_fast,**F_slow**,vx,vy]`(**慢分量作为输入特征
+  保留**,只是不作目标);`raw` → `[F,x,y,vx,vy]`。
+- `warmup_sec=5.0`:每 clip 前 5 秒在训练与评测中**都丢弃**(因果滤波启动暂态)。
+
+**关键澄清:该路线 ≠ 当前运行的路线。** 冻结 harness 的目标是 **RAW**——
+`configs/actionsense/eval_harness.yaml` 与 `configs/opentouch/eval_harness.yaml` **都逐字写着**
+`RAW = the physical moments straight from state_N.npy (NO high-pass; NO warmup cut)`;OpenTouch 的
+`gru_aggregate` 吃的也是 harness 的 RAW 通道。**因此今天的直流偏置问题是 Q1 决定的直接后果**:
+2026-08-11 用户在 Q1 选了 (a) 6-dim RAW 而非 (b) 3-dim FAST,**而该决定作出时无人看过 OpenTouch
+的真实信号**。
+
+**D1 因此拆为两个层级不同、互不替代的决定(已向用户列出):**
+- **D1a 传感器级直流**:每 taxel 静息偏置(≈2930/格),在**计算 F/CoP 之前**扣除。现状:未做
+  (`extract_opentouch.py` 刻意推迟)。`slow_fast` **不解决**这一层——它作用于力矩计算之后的
+  F/CoP,对每格偏置无能为力(即 docstring 所称的 "ActionSense DC-offset bug (P4)")。
+- **D1b 信号级慢分量**:用 `slow_fast` 把低频漂移从**目标**中去掉。现状:未做(harness 选 RAW);
+  若采纳需**重开 Q1**。
+**OpenTouch 目前两层都没做,故 F 有 95% 是常数。**
+
+**可比性提醒(已告知用户)**:ActionSense 的 probGRU 数字是在 **FAST 目标**上取得的,OpenTouch
+的 GRU-aggregate 打的是 **RAW 目标**,两者**不可直接对照**;harness 层面 RAW vs RAW 一致,故 G1
+的跨传感器比较本身不受影响。
+
+### 2026-08-13续12 — 用户裁定:用与 ActionSense 完全一致的 probGRU 训练 OpenTouch(推翻 OQ-G)
+
+**用户指令**:"不用 low pass,用所有频率的 history 作为 input 预测;改变模型,仍然使用和
+ActionSense 完全一致的 probGRU、loss function、architecture 来训练 OpenTouch。"
+
+**Claude 先摆出的三个事实(实施前澄清,未擅自决定)**:
+1. **warmup 5 秒物理上不可行**:ActionSense `build_features` 默认丢弃每 clip 前 **5.0 s**
+   (因果滤波启动暂态),而 OpenTouch clip **中位仅 2.80 s(84 帧)**,照搬会清空绝大多数 clip。
+2. **probGRU 架构含 action embedding**(`nn.Embedding(n_act,8)`,解码每步拼进输出头),即
+   **模型被动作标签条件化**;ActionSense 在少数动作上池化训练,OpenTouch 约 50 个动作且长尾,
+   词表规则是新问题。
+3. 该要求**明确推翻 OQ-G**("GRU-aggregate 用点预测")。故**新建 `src/opentouch/prob_gru.py`**,
+   **不改** `gru_aggregate.py`(后者是预注册的确定性臂,不应就地改写)。
+
+**用户通过 AskUserQuestion 的两项裁定(2026-08-13)**:
+| 问题 | 裁定 |
+|---|---|
+| 预测目标 | **RAW 3 维** [F,CoPx,CoPy](非 FAST)。→ 可被冻结 harness 直接打分,与 baseline 同尺度对比;代价:严格说与 ActionSense probGRU 的**目标**不同(架构与 loss 一致)。 |
+| action embedding | **保留**(架构完全一致)。 |
+
+**`src/opentouch/prob_gru.py`(commit `494738a`,已推送)**
+- **逐字复制**:action embedding、encoder GRU、**自回归** decoder(以最后观测目标 seed,把预测
+  的 `mu` 喂回下一步)、`[decoder state ; action emb]` 上的 mu/logvar 双头、`logvar.clamp(-6,4)`、
+  **高斯 NLL `0.5*(lv + (y-mu)^2*exp(-lv))`**、按 VAL NLL 早停、以及**其自身超参
+  (hidden 48 / epochs 80 / lr 3e-3 / batch 64)**——注意**不是** gru_aggregate.yaml 的 64/60,
+  那属于 tactile_map aggregate 分支(另一个模型)。
+- **四处被迫的差异(均已在 docstring 说明理由)**:(1) 目标 RAW(用户裁定);(2) 输入为全频段
+  `[F,CoPx,CoPy,vx,vy]`,含 ActionSense 的**因果**后向差分速度,**全文件无任何低通**;
+  (3) **无 warmup 裁剪**(无滤波器即无暂态,且 5 s 会清空语料);(4) 窗口取自 harness 的
+  `origins()`(训练与打分看同一组 rolling origins),而非 ActionSense 的 stride-2 采样——stride
+  属采样细节,不属架构/loss。
+- **归一化**:目标用 harness 的 TRAIN-fitted `Norm`(与 baseline 共享一套),输入特征另用
+  TRAIN 拟合的 z-score(因含速度,harness Norm 不覆盖)——对应 ActionSense 分离的 nx/ny。
+- **动作词表**:**仅由 TRAIN 构建**(用 VAL/TEST 的动作定义词表会把 split 泄漏进模型输入空间);
+  TRAIN 中 n < `baselines.min_group_size`(=30,与 AR baseline 合并稀有 object_category 用的
+  同一阈值)的动作并入 `"other"`(id 0),TEST 中未见过的动作也落 `"other"`。
+
+**测试 `tests/test_opentouch_prob_gru.py`**:特征因果性(t 时刻之后的改动不得影响 t 之前的特征)、
+特征布局、**仅 VAL 出现的动作不得产生新 embedding id**、预测形状与 harness `origins()` 一致、
+确定性(同种子两次结果 bitwise 一致)、以及**loss 确为高斯 NLL**(固定残差下 logvar 的最优值应为
+`log(残差^2)`,MSE 伪装成的 loss 不满足此性质)。**本机 torch 半装,这些测试只能 skip
+(43 passed, 3 skipped),必须在 CRC 上真实运行**;驱动脚本改动后已本地复验 baseline 路径正常。
+
+**驱动脚本**新增 `--model {prob_gru,gru_aggregate,both,none}`,默认 `prob_gru`。
+
+### 2026-08-13续13 — CRC 实跑暴露 `KeyError: 'sports equipment'`;根因在驱动脚本未做既定检查
+
+**报错**:`baselines/ar.py:93 KeyError: 'sports equipment'`(经 `predict_series_by_clip`)。
+
+**根因**:AR 按 `object_category` **分组拟合**;而我的临时 split 按 `scene` 整组留出,某个
+category(如 sports equipment)可能**完全存在于被留出的 scene 内**,于是 TRAIN 从未拟合过它,
+AR.predict 取系数时 KeyError。**这不是 baseline 的 bug**——`dataset.missing_groups()` 的
+docstring 明写:"Non-empty = AR.predict() will raise KeyError deep inside baselines/ar.py
+rather than failing at split-construction time with a clear message -- so splits.py MUST call
+this after building a split and assert the result is empty (OQ-I option (a))"。
+**是我的驱动脚本没有调用这个既定检查。**
+
+**修复(commit `49b4db0`)**:`adhoc_split` 现在在划分后循环检查——若某个留出单元携带 TRAIN 见不到
+的 AR 组,就把**整个单元**搬回 TRAIN,直至无缺失;随后对 val/test 分别 `assert missing_groups()
+为空`,使失败发生在**划分阶段并带清晰信息**,而不是运行 20 分钟后死在字典查找上。搬移的单元会
+被打印。**代价**:split 向 TRAIN 偏移,已在 docstring 中记为"这些数字是探索性的"的又一条理由;
+整单元搬移保证仍是 scene 粒度留出,不产生 clip 级泄漏。
+
+**验证方式的自我修正**:第一版合成数据(4 scene、每个独占一个 category)过于病态,导致全部被搬进
+TRAIN、test 为空——守卫正确拦截并给出清晰提示,但**没有走到搬移路径**;第二版把独占 category 设
+为 12 clip,低于 `min_group_size: 30` 被并入 `other`,**仍未触发**。第三版设为 36 clip(≥30,保留
+为独立组)后改为**对 `adhoc_split` 做单元级验证**(全流程太慢):**40 个 seed 下修复后缺失组为 0;
+同样 40 个 seed 用不搬移的旧逻辑有 14 个会缺组——正好是触发搬移的那 14 个**,构成干净的反证。
+(教训:两次"测试通过"其实都没覆盖目标路径,若不追查会误以为已验证。)
+
+### 2026-08-14 — 探索性首跑结果解读 + GPU 作业脚本(含一个必须先修的缺陷)
+
+**用户在 CRC 完成冒烟运行**(`--epochs 1 --histories 1 --max-clips 300`),pipeline 端到端跑通:
+```
+persistence  F_R 174,481,881 | CoPx 0.00009 | CoPy 0.00003
+seasonal     F_R 176,954,686 | ...           skill vs persistence: -0.014 / -0.018 / -0.020
+ar           F_R 125,562,891 | ...           skill: +0.280 / +0.441 / +0.256
+prob_gru     F_R 131,372,398 | ...           skill: +0.247 / +0.377 / +0.187
+```
+**解读(已发用户)**:
+- **定量证实直流偏置问题**:persistence 在 F 上的 RMSE ≈ 13,200,而 F 本身 ≈ 750,000 →
+  **1 秒预测"假设完全不变"只错 1.8%**;所有模型都在这 1.8% 的余量内竞争。CoP 的 RMSE ≈ 0.009
+  (坐标域 [-1,1]),因 CoP 几乎钉在中心。**skill +0.28 的含义是"把慢漂移拟合得比 persistence 好",
+  与触觉动态的可预测性基本无关。**
+- **排序 AR > probGRU > persistence > seasonal 恰好复现 ActionSense 的结论(G1 的核心问题),
+  但现在不能当证据**:probGRU 只训了 **1 个 epoch** 却已拿到 +0.25,说明分数主要来自任务过易;
+  且仅 300 clip、仅 1 s history、临时 split、直流主导目标。
+- seasonal ≈ -0.02,与既有结论一致(无自相关峰 → 退化为 persistence)。
+- **`vocab 2`**:300 clip 子集中只有 1 个动作达到 `min_group_size=30`,**action embedding 本次
+  几乎未起作用**;全量下预计 10-14 个动作达标。
+- val NLL(0.0604)约为 train(0.0186)的 3 倍,1 个 epoch 即有此差距——可能过拟合,也可能是按
+  scene 留出导致 val 分布不同,需全量 NLL 曲线分辨。
+- **全量耗时外推**:300 clip → 16,063 训练窗口 → 7 s/epoch;全量约 9.7 倍窗口且 t_in 由 30 扫到
+  90 帧 → **前端 CPU 约 7-9 小时**。
+
+**用户指示"写 qsub 用 GPU 跑"。发现并先修的缺陷**:`prob_gru.py` **原本没有任何 `.to(device)`**
+——直接提交到 gpu 队列会**占着一张卡以 CPU 速度运行**。已补:`pick_device()`(有 GPU 用 cuda,
+否则 CPU)、模型与每个 batch 上设备、预测经 `.cpu()` 回传、`history["device"]` 记录实际设备
+(**CUDA 运行不能声称 CPU 那种 bitwise 可复现性**,因 cuDNN 的 RNN kernel 即使在 deterministic
+模式下也不保证确定性——该 caveat 早在 `gru_aggregate.configure_determinism` 中写明)。
+驱动新增 `--device`。
+
+**`scripts/crc/opentouch_probgru_gpu.job`(commit `f3de7c8`)**:沿用 repo 既有 UGE 约定
+(`-q gpu -l gpu_card=1 -pe smp 4`,`#$` 行内无注释,日志入 `logs/`)。两处前置校验使失败在几秒内
+发生而非浪费数小时 GPU 时段:(a) 校验 `data/opentouch_states/manifest.jsonl` 存在(该 symlink 是
+cache 的唯一入口,静默训练空数据会白费整个 slot);(b) **先跑依赖 torch 的两个测试文件**
+(它们只在有可用 torch 的机器上真正执行,CRC 是唯一场所)。支持
+`qsub -v EPOCHS=,MODEL=,MAX_CLIPS=,HISTORIES=,SEED=,SPLIT_FIELD=,OUT=` 覆盖。
+本地已验证:`bash -n` 通过、`${VAR:+--flag}` 在 `set -u` 下未设变量时安全展开、baseline 路径回归
+正常、`pytest tests/` 43 passed 3 skipped。
+
+### 2026-08-15 — splits.py 完成(D9 解决);F/CoP 直流问题按用户指示挂起待结果
+
+用户指示:"正在跑,现在来解决这次 run 的缺陷,完成 split;F 和 CoP 变化很小的问题先记录,
+等结果出来之后再看。"
+
+**一、论文核查(不解决问题,但排除了猜测)**:arXiv:2512.16842 全文——14 个环境、每场录制
+5-25 分钟、clip 平均 57 帧;**未定义任何官方 split,未提泄漏**;`_pN` 的含义**论文没有正式定义**。
+(注:抓取摘要中"_pN 看起来是参与者"、"参与者跨多个地点"两句是**推断而非原文**,不作为依据。)
+语料本身也**没有任何参与者字段**。
+
+**二、用户裁定(AskUserQuestion, 2026-08-15)**:
+| 问题 | 裁定 |
+|---|---|
+| split 轴 | **按地点基名留出**(剥掉 `_pN`,如 office_ml_p1/p2 归为一个单元) |
+| AR 分组冲突 | **让 group_keys 感知 TRAIN**(未在 TRAIN 出现/样本不足的类目归 `other`) |
+
+**三、为什么"按地点"能解开死结**:无论 `_pN` 是参与者还是场次,同一地点的全部 shard 都在同一侧
+→ **该未解决的问题变得无关紧要**,而不是被猜测掉。26 shard → **12 个地点**
+(hardware_homedepot 5;home_kitchen/grocery_target/fablab_ml 各 3;sports_dicks/office_ml/
+office_csail/eat_ygf 各 2;home_bedroom/grocery_tj/grocery_plant/eat_mcdonalds 各 1)。
+**仍不能保证的**:若同一人在多个地点录制,他会出现在两侧——**manifest 无人物标识,任何基于它的
+split 都无法排除**。已写入模块 docstring,并要求报告时称"按地点留出"而非"按参与者留出"。
+
+**四、被卡住的第二个原因(此前未识别)**:粗粒度 split 与 AR 的 `fit_scope: object_category`
+**结构性冲突**——物体跟着地点走,留出一个地点就带走它的类目,而 `group_keys` 用**全语料计数**,
+导致"全语料常见但 TRAIN 完全没有"的类目 → 即 08-13 的 `KeyError('sports equipment')`。
+**修复**:`group_keys(cfg, idxs, train_idxs=None)`,传 `train_idxs` 则按 TRAIN 计数(不传保持原行为,
+既有调用与测试不受影响);`evaluate.fit_and_forecast` 传入 TRAIN。
+
+**五、测试当场揪出的残余漏洞(重要)**:仅按 TRAIN 计数**还不够**——若 TRAIN 中每个类目都达标,
+则**没有任何 TRAIN clip 落进 `other`**,被映射到 `other` 的留出类目仍然无系数(9 个测试里 5 个
+当场失败)。**补救:把 TRAIN 中最小的达标类目按升序并入 `other`,直到 `other` 达到
+`min_group_size`**,保证**兜底组自身永远可拟合**。代价是一两个类目失去独立 AR 拟合。
+
+**六、另一个自造 bug**:`assign()` 原写法 `sorted(...)` 之后又 `shuffle(...)`,**排序被打乱**,
+"大单元优先放置"的意图失效 → 合成数据上 **89% 的 clip 被塞进 train**。改为先 shuffle(供 seed
+变化)再按大小降序 sort。注:当存在一个占比 62.5% 的巨型地点时,配额本就无法更接近——除非把地点
+拆开,而那正是本设计要避免的。
+
+**七、交付**(commit `e9e278e`,已推送):
+- `src/opentouch/splits.py`:`location()` / `by_location()` / `assign()`(贪心填最缺额的桶) /
+  `build()`(内含 `missing_groups` 断言) / `save()` / `load()` / `summarize()` / CLI。
+- **`evaluate.main()` 不再抛 NotImplementedError**:建或载入 split → 跑冻结协议 → 写表。
+- 驱动新增 `--split-mode {location,adhoc}`,**默认 location**。
+- `tests/test_opentouch_splits.py` 9 个测试(后缀规则、地点不跨侧、覆盖且不重复、15 个 seed 下
+  AR 永不遇到未拟合组、**反证旧的全语料规则在同一 split 上必然失败**、确定性、seed 敏感性、
+  比例边界、往返序列化、地点过少报错)。**全套 52 passed, 3 skipped**,无回归。
+- 合成语料端到端验证:train 55.6% / val 22.2% / test 22.2%,`other` 组含 30 个 TRAIN clip。
+
+**八、按用户指示挂起的事项**:**F/CoP 的直流偏置问题(D1)不在本轮处理**,已在续8/续11 详细记录
+(F 中 95%+ 为直流、CoP 近乎钉在中心、D1a 传感器级 vs D1b 信号级两层、ActionSense 用
+`slow_fast` 只解决 D1b)。**等 GPU 作业结果出来后再评估。**
+
+**九、对正在运行的作业的影响**:该作业已加载旧代码(ad-hoc scene split),**不受本次改动影响**;
+其结果仍是探索性的。日后 `git pull` 后默认切换为 location split,两者数字**不可直接比较**。
+
+### 2026-08-15续 — 用户三项决定:4 折分组交叉验证、action 词表说明、G2 改为"合训分评"
+
+**一、用户决定:改用 4 折分组交叉验证(grouped k-fold,单元=地点)。**
+Claude 提出的理由(用户采纳):12 个地点做单次 60/20/20 后,**TEST 只剩 2-3 个地点**,抽到
+`eat_mcdonalds`(单一场景、动作少)还是 `hardware_homedepot`(5 shard、动作丰富)会让结果天差地别
+——**该差异来自抽签而非模型**。轮转后既用满数据,又能给出"跨地点方差"这一本身有价值的量。
+实现(`splits.folds`):把 12 个地点按 clip 数贪心划为 k 个 block(大单元优先进最空的 block);
+fold i 取 block i 为 TEST、block (i+1)%k 为 VAL、其余为 TRAIN → **每个地点恰好当一次 TEST、
+一次 VAL**,且任一 fold 内 train/val/test 三者地点互不相交。每个 fold 独立通过
+`missing_groups` 断言。驱动新增 `--folds k`,输出含 `fold` 列,并打印**跨折的
+mean [min, max]**——刻意不是只报均值:"在三个地点赢、第四个输"的模型没有证明跨环境泛化。
+新增 5 个测试(每地点恰好当一次 TEST、fold 内地点不交叉、折间规模不失衡、确定性、k<3 报错),
+`tests/test_opentouch_splits.py` 共 **14 passed**。
+
+**二、回答"词表只从 TRAIN 构建"是什么意思**:probGRU 的 `nn.Embedding(n_act, 8)` 是一张查找表,
+行数必须训练前定死。规则:**只统计 TRAIN 的 clip**,TRAIN 中出现 ≥ `min_group_size` 的动作各占
+一行,其余(TRAIN 中罕见,或 TRAIN 中**根本没出现过**)一律映射到第 0 行 `other`。
+**为何不能用全语料建表**:只在 TEST 出现的动作会得到一行**从未被训练的随机初始化向量**,且词表
+本身泄漏了测试集信息(等于告诉模型"存在这些动作")。**按地点留出后的后果**:测试地点可能含训练
+地点没有的动作,它们全落 `other`,**embedding 恰在最需要它的新情况下失效**——这是诚实的代价,
+须在报结果时说明。
+
+**三、用户裁定 G2 的执行方式:"无论 abrupt 还是 smooth 都一起训练,只在 test set 里分开
+evaluate 两类动作来验证 G2。"** Claude 赞成(smooth 仅 233 clip,分开训练不可行)。
+**但据此发现与原 G2 设计的冲突并已提请用户注意**:2026-08-11 的 G2 写的是"**按 trait class
+分别拟合 AR**"。若 AR 按类分别拟合而 GRU 合并训练,**AR 白得一次按类特化的机会,比较不公平**。
+按新裁定应统一为:**所有模型(persistence/seasonal/AR/probGRU)在全量 TRAIN 上拟合一次,再把
+TEST 按 trait 拆成两组分别计分**。已告知用户,若无异议即照此实现。
+**注意执行顺序不变**:按类的数字仍须等 D3(36 个未审计动作词)与 OQ-L/OQ-M 签字**之后**才能查看,
+否则裁定变成 post-hoc。因此本轮只落地机制,不产出任何按类数字。
+
+### 2026-08-15续2 — G2 接线完成:全量拟合一次,只在 TEST 上按 trait 分开计分(commit `273e905`)
+
+用户确认:"AR 也一样,都只在 test set 上的 abrupt / smooth 子集上分别实现。"故
+**2026-08-11 的"按 trait class 分别拟合 AR"作废**——若 AR 按类特化而 GRU 合并训练,比较测到的
+是特化优势而非 trait 本身。
+
+**发现阶段 1 已把计分机制建全**,无需重造:`aggregate.py` 的 `clip_stats()`(逐 clip 充分统计)、
+`r2(st, model, baseline, rows=...)`(**`rows` 参数正是"同一拟合模型、只换子集计分"的入口**)、
+`clip_balanced_mean`、`delta_r2`;`bootstrap.py` 的 paired / two-sample(含分层)。缺的只是把
+harness 的逐 clip 预测接进去的胶水。
+
+**新增 `evaluate.collect_clip_stats(cfg, splits, external=None)`**:在全量 TRAIN 上拟合每个
+baseline → 用 `predict_series_by_clip` 保留 clip 归属地预测 TEST → 可并入 GRU 臂的逐 clip 预测
+(`external={name: {clip_idx: (n_origins,H,C)}}`,即 `prob_gru.predict` 的返回形态)→ 收敛成一个
+`ClipStats`,**所有模型在同一套 masked 点集上计分**。
+
+**新增 `evaluate.trait_rows(cfg, st, allow_unaudited=False)`**:返回各桶到 `st.clip_ids` 的行索引,
+供 `aggregate.r2(..., rows=...)` 使用。**当 TEST 中存在未审计动作时直接拒绝返回**(报出具体是哪些
+动作),因为"先看数字再裁定"正是预注册要防的 post-hoc——该约束**写进代码强制执行,不靠记忆**。
+截至 2026-08-13 有 36 个未审计动作、覆盖 278 clip,**因此 G2 现在会被这道守卫挡住,符合预期**。
+
+**写测试时发现并修正了我自己的一处错误**:我原 docstring 断言 `trait.partition` 会对未审计动作
+抛异常——**实际不会**,它分成 smooth/abrupt/**unlabeled**/**unaudited** 四桶,抛异常的是
+`trait_class`。测试当场揭穿(断言集合不等),遂改为显式检查 unaudited 桶。3 个新测试:
+按类计分用的是同一拟合模型、未审计动作拒绝计分、外部预测能并入同一份统计且不改变 baseline 的
+SSE。**全套 60 passed, 3 skipped。**
+
+**下一步的唯一阻塞**:D3——36 个未审计动作词的 rubric 补裁 + OQ-L/OQ-M 签字。做完 G2 即可出数。
+
+### 2026-08-15续3 — 用户签字 OQ-L / OQ-M(采纳 Claude 的分类)
+
+**用户 2026-08-15 回复**:"OQ-L 和 OQ-M 我都同意你的分类。"
+- **OQ-L 确认**:`eating` / `drinking` / `scooping` / `serving` **主标签判 abrupt**,并**全部列入
+  争议子集**(走第三层敏感性分析)。注:这与 2026-08-07 的旧集合(四个都算 smooth)**相反**,也与
+  07-02 probe 的 PI 排名相反——该分歧已如实记录,由用户裁定采纳 rubric 推论。
+- **OQ-M 确认**:`pulling` / `pushing` / `adjusting` / `turning` / `moving` / `inspecting`
+  **判 abrupt 且列入争议子集**(真实数据实测合计 **678** clip,非 08-11 记录的 684)。
+
+**必须澄清的范围问题(已告知用户)**:**OQ-L/OQ-M 的签字不等于 D3 完成。** 二者只覆盖 10 个已在
+冻结表内的动作;**36 个从未审计的动作词(覆盖 278 clip)仍未裁定**——`lifting`/`rotating`/
+`twisting`/`folding`/`dropping`/`tapping`/`inserting`/`typing` 等。`evaluate.trait_rows()` 的守卫
+会因它们继续拒绝 G2 计分,**这是预期行为**。
+**已向用户提议**:由 Claude 按 rubric 逐词给出裁定建议与依据(区分 R1 碰撞/释放判据 vs 持续位移
+主体),并标注应否列入争议子集,交用户逐条签字。**等待用户确认后再动手。**
+
+**另**:已向用户说明 GPU 作业的进度查看方式(`qstat -u $USER`;`logs/opentouch_probgru.o<JOB_ID>`;
+`grep -c "] epoch "` 数累计 epoch,总数 240 = 3 histories × 80),并提醒 **epoch 计数器每换一个
+history 会重置**,须结合最近的 `sweep:` 行判断真实进度。
+
+### 2026-08-15续4 — 澄清：CoPx/CoPy 的坐标系到底是什么（用户提问，纯分析，无代码改动）
+
+**用户问**:"COPx COPy 到底是什么？描述的是 CoP 在手上这个坐标系的位置，还是真实世界物理空间的
+位置？如果 plot 出 CoP 坐标，坐标系是什么、表示什么？"
+
+**答（已核对代码，非记忆）**:
+- **定义**:压力加权质心。`physical_state.py:48-49`（ActionSense)与 `extract_opentouch.py:148-149`
+  (OpenTouch) 是同一套数学:`xbar = Σp·gx/Σp`,`ybar = Σp·gy/Σp`。
+- **坐标系 = 传感器阵列自身的索引坐标**,由 `physical_state._grids`(:29-33)线性归一化到 [-1,1]:
+  **x = 列方向,y = 行方向,原点 = H×W 矩阵几何中心,半阵列宽 = 1.0**。
+- **不是世界坐标**:sensor-fixed,随手平移旋转。手握物整体在空间移动 → CoP 不变。CoP 变化 ≡
+  载荷在手面上重新分布(打滑、滚握、刀刃行程扫过掌面)。
+- **也不是严格的解剖学手坐标**:轴向是传感器矩阵的行/列方向,不是近远端/桡尺侧;格子→手上皮肤
+  的映射由手套走线布局决定(AS 32×32;OT 16×16 中仅 169 格活)。
+- **单位是无量纲 grid units,不是 mm**;换算需 taxel pitch,且是沿贴合弯曲手面的薄膜距离,非 3D 欧氏。
+
+**各图纵轴的实际含义(易读错,记录在案)**:
+1. `docs/opentouch_fcop.png` — `plot_opentouch_fcop.py:27` 标注 `CoP x [-1,1]`,即原始网格坐标。
+2. `docs/forecast_CoPx.png` 等 v2 图 — **不是位置**。`load_pooled(input_mode="highpass")` 的 target
+   是 CoP 的高通(fast)残差,单位仍为 grid units 但零点是慢分量,不能据此推断"手上哪个位置"。
+3. harness 6 维 target(`eval_harness/dataset.py:3`)是 raw 网格坐标,训练时按通道 z-norm。
+
+**四个坑(结论性)**:
+1. F→0 时 CoP 无定义 → `masking.py` 按力阈剔除;低接触时比值放大噪声(呼应 :1041)。
+2. **两数据集的 CoP 不是同一个量**:AS 做了 `baseline_correct`(动态接触质心);OT 故意未做
+   (`extract_opentouch.py:21-25`),含 DC 偏置故"几乎不离开传感器中心"
+   (`run_opentouch_exploratory.py:20`)。**跨数据集直接比 CoP 数值是错的。**
+3. **OT 的 (0,0) ≠ 有效接触区中心**:87/256 死格读 0 不贡献权重,可达域是活格凸包;除非活格集合
+   关于矩阵中心对称,否则 CoP=0 无"居中"物理含义。**这是一个尚未量化的量**(见下)。
+4. y 随行索引增大 + imshow 默认 origin='upper' → filmstrip 上 y 向下为正;
+   `plot_opentouch_tactile_map.py:15` 的 `row=(cy+1)/2*(H-1)` 与此自洽。
+
+**实测印证**:扫 `data/actionsense_states/state_{0,1,10}.npy`,CoP 幅度典型仅 ±0.15~0.35,即动态接触
+始终集中在阵列中部一小块 —— 与"手套上的局部位置"一致,与"世界坐标"无关。
+
+**由此浮现的待办(未动手,待用户决定是否做)**:算一次 OpenTouch 活格集合的几何中心与凸包范围,
+把 CoP 的"名义零点"与"有效零点"的偏差量化;否则 OT 的 CoP 数值缺一个可解释的参考点。
+
+### 2026-08-15续4 — 结果查看:补上"保存预测 + 画预测曲线"的缺口(commit `6dfc042`)
+
+用户要求看:F/CoPx/CoPy 的预测曲线(横轴时间,含 history 与 prediction,含均值与方差)、
+probGRU vs persistence vs AR 的对比、以及分动作类别的评估。
+
+**发现的缺口(必须先说明的坏消息)**:**已完成的那次运行只写了指标 CSV,没有保存模型或预测**
+——进程退出时模型和预测全部丢弃,因此**几小时 GPU 时间无法产出任何一条预测曲线**。这是我此前
+设计驱动脚本时的疏漏。
+
+**补救(已实现并推送)**:
+- `--save-preds DIR`:逐 clip 保存 `clip_<idx>.npz`(该 clip 的真实信号 `y`、`origins`、`fps`、
+  action/object、每个模型的 `mu_<model>`,以及 probGRU 的 `sigma_prob_gru`)。**baseline 的预测用
+  `predict_series_by_clip` 重算以保留 clip 归属**,而不是从 `fit_and_forecast` 返回的拼接数组里
+  切——后者已丢失 clip 身份。
+- `prob_gru.predict_with_sigma()`:返回 RAW 单位的 (mu, sigma)。z-score 是逐通道线性变换,
+  均值项抵消,故 `sigma_raw = exp(lv/2) * norm.std`。
+- `scripts/plot_opentouch_forecast.py`:行=clip,列=通道;**同一时间轴上画出 history 与 horizon**,
+  灰竖线标 forecast origin,黑线为真实值(历史段实线、未来段淡化),各模型不同颜色线型,
+  **probGRU 叠 ±2σ 带**。已用合成的 `--save-preds` 形态数据本地验证出图正确(σ 带随 horizon 变宽
+  可见)。
+- **为什么要画那条 σ 带**:该方差头**参与训练(占高斯 NLL 的一半)却从不被评分**(冻结 harness 只
+  测点误差)。这张图是它唯一可见之处:**若带宽不随 horizon 变宽,说明概率那一半什么也没学到**,
+  而任何 MSE 表都看不出这一点。
+
+**代价**:要出图必须**再跑一次**带 `--save-preds` 的作业(预测无法从已有 CSV 反推)。
+
+**分类别评估仍被挡住**:`evaluate.trait_rows()` 因 **36 个未审计动作(278 clip)** 拒绝计分——
+这是预期的预注册保护。**OQ-L/OQ-M 已签字不解除该阻塞**(二者只覆盖表内的 10 个动作)。
+已再次向用户提议:由 Claude 按 rubric 逐词给出 36 个词的裁定建议与依据,用户签字后 G2 即可出数。
+
+### 2026-08-15续5 — 【结果】GPU 全量首跑完成(2026-08-15 08:11 EDT):probGRU 反超 AR
+
+**运行配置**(据输出的 split tag 判定):**全量语料、ad-hoc `scene` 级 split、seed 0、单次划分
+(非 4 折)、`--model prob_gru`**。即该作业用的是**提交时的旧代码**,**早于** `splits.py`
+(location split)与 4 折的落地,故与日后 location-split 的数字**不可直接比较**。
+
+**结果原文**:
+```
+=== full-horizon per-channel MSE (EXPLORATORY, split=adhoc-scene-seed0) ===
+model                     F_R       CoPx_R       CoPy_R
+persistence      234836372.94630      0.00008      0.00004
+seasonal         235574173.63953      0.00008      0.00004
+ar               193205409.42370      0.00006      0.00003
+prob_gru         186618481.82375      0.00005      0.00003
+
+=== skill vs persistence ===
+seasonal              -0.0031      -0.0066      -0.0056
+ar                     0.1773       0.2695       0.1984
+prob_gru               0.2053       0.2911       0.2405
+```
+换算成可读量级:persistence 的 F 上 RMSE ≈ **15,324**(约为 F≈750,000 的 **2.04%**);ar ≈ 13,900
+(1.85%);prob_gru ≈ 13,661(1.82%)。**即"1 秒后假设完全不变"只错 2%,所有模型都在这 2% 的余量
+内竞争**——D1(直流偏置)未解前,这些 skill 与"触觉动态可预测性"关系很弱。
+
+**最值得注意的发现:排序相对冒烟运行发生了翻转。**
+| | AR | probGRU | 排序 |
+|---|---|---|---|
+| 冒烟(300 clip, 1 epoch) | 0.280 / 0.441 / 0.256 | 0.247 / 0.377 / 0.187 | AR > GRU |
+| **全量(80 epochs)** | 0.177 / 0.270 / 0.198 | **0.205 / 0.291 / 0.241** | **GRU > AR(三个通道全部)** |
+充分训练后 **probGRU 在全部三个通道上超过 AR**。**G1 的核心问题是"ActionSense 的
+AR > GRU > persistence 能否在第二个传感器上复现"——就本次(探索性)证据看,它没有复现,
+方向相反。** 同时两者的 skill 绝对值都比冒烟时低,与"全量语料更难、冒烟子集偏易"一致。
+seasonal 仍略负(-0.003~-0.007),与"无自相关峰、退化为 persistence"的既有结论一致。
+
+**必须附带的限定(缺一不可)**:
+1. **探索性**:ad-hoc scene split,非 location split,更非 4 折——**换一组留出地点结论可能不同**。
+2. **D1 未解**:目标 95% 是直流,比较的是"谁把 2% 的漂移拟合得更好"。
+3. **单次划分**:无跨折方差,无置信区间。
+4. **无分类别结果**(G2 仍被 36 个未审计动作挡住)。
+5. **未保存预测**:该运行无法产出任何预测曲线(见续4),要出图须带 `--save-preds` 重跑。
+
+**因此本条记录的是一个"信号",不是结论。** 要把"GRU > AR"变成可报告的发现,至少需要:
+location split + 4 折 + D1 定案后重跑。
+
+### 2026-08-15续5 — 分析:CoP 能否投影到世界坐标(用户提问,纯分析,无代码改动)
+
+**用户问**:"如果想 plot CoP 的 trajectory,理论上可以把 CoPxy 投影到世界坐标里吗?"
+
+**结论:理论可行,但"投影已算好的 CoP"这个动作本身在数学上是错的,且我们目前缺最关键的一块标定。**
+
+**(a) 数学纠正(结构性,非实现细节)**
+设 φ:网格坐标 → 世界 3D。所求为 `Σpᵢ·φ(xᵢ)/Σpᵢ`;"投影 CoP"算的是 `φ(Σpᵢ·xᵢ/Σpᵢ)`。
+**二者仅当 φ 仿射时相等。** φ 必不仿射:16×16 是电学行列矩阵,到手面的嵌入是 FPC 走线布局,
+弯曲且几乎必然**不连续**(矩阵相邻格在手上可能相隔数厘米,如指尖与拇指尖)。87/256 死格本身
+即"手形活区 + 矩形补白"的证据。
+→ **正确做法:先把每个 taxel 映到 3D,再在 3D 里算加权质心。** 故 `state_*.npy` 的 6 维矩不够用,
+**必须从 `clip_*.npy` 重算**。(3D 质心落在手内部是正常的,那正是刚体意义的压心。)
+
+**(b) 需要三块信息,现状盘点**
+1. **taxel→手局部 3D 表面点 —— 没有,最大缺口。** 仓库无任何 taxel 布局/几何标定。shard 顶层
+   `calibration` 字段(:510)**从未被打开检查过**,可能仅是压力标定曲线。**第一个要查的。**
+2. **逐帧世界系手姿态 —— 存疑,记载自相矛盾。** `extract_opentouch.py:10` 写 `(T,21,3)`,
+   `probe_opentouch.py:6` 记 `(21,3)`。**若为 (21,3)(每 clip 一帧),逐帧世界轨迹直接不可行。**
+   且 Rokoko Smartgloves 只给相对腕部的手指关节,绝对世界位姿须走 Aria SLAM
+   (`camera_poses` / `transform_slam_to_rgb`)。
+3. **手表面(非仅关节) —— 没有。** 21 landmark 是骨架点;需 MANO 类手网格蒙皮
+   (`batch_process_wilor_simple.py` 是上游遗留)。
+**ActionSense 侧更彻底:根本没抽 pose**(cache 仅 `state_*`/`clip_*`),要用需重新下载 Xsens。
+
+**(c) Claude 的判断(向用户明确表态):世界系 CoP 轨迹对 G2/trait 研究大概率负价值。**
+它会被**手的整体位移主导**(端物体走一米,而手上载荷分布可能纹丝不动)。传感器系 CoP 恰恰滤掉
+整体运动,只留"载荷在手上如何重新分布"——正是 smooth/abrupt 要区分的量。换世界系 = 注入一个
+与手法无关的巨大混杂项。**演示/可视化可用世界系;预测/trait 分析应留在传感器系。**
+
+**(d) 提出两个更便宜、可能才是用户真实需求的替代**
+1. **画活格掩膜形状**(逐格时间方差,用 `clip_*.npy`)。若呈手形(掌+五指条带),即**免费获得 taxel
+   的解剖学语义**,CoP 落点立刻可解释,无需任何 3D 标定;并顺带解决续4 遗留的"活格形心 ≠ 名义零点"。
+2. **在现有 filmstrip 上叠加 CoP 历史轨迹拖尾**。同一坐标系内不涉及非仿射映射,**完全正确**,
+   且直接就是用户要的 "CoP trajectory"。
+
+**(e) 若要推进 3D 版本,第一步是三个可证伪检查(CRC,只读)**:`calibration` 是否含几何;
+`hand_landmarks` 形状是 (T,21,3) 还是 (21,3);腕点是否随时间移动(判世界系 vs 腕局部系);
+`camera_poses`+`transform_slam_to_rgb` 是否闭合世界系链路。**任一为否,3D 方案即终止。**
+已向用户提议写该只读探查脚本(不改数据、不产出任何 R²,不干扰 D1~D9 决策链)。**等待用户指示。**
+
+### 2026-08-15续6 — 【用户裁定】D1/D2/D3 的做法被修正;执行顺序前插零成本可行性检查
+
+用户对 Claude 的 D1/D2/D3 方案提出实质性修正,**以下为用户原意的完整记录(Claude 的原方案在相应
+位置被推翻)**:
+
+**D1 — 必须把"扣基线"与"压噪声"拆成两件事。**
+- **基线用中心统计量:无接触段的 median**,**不是低分位数**。理由(Claude 原方案用 5% 分位,被否):
+  低分位数确是"不被接触污染"的稳健估计器,但它**系统性低估**,而代价就是**整流偏置**——扣掉一个
+  偏低的基线再截断到 0,残余噪声被半波整流,产生随噪声水平缩放的虚假正偏。
+- **噪声用显式阈值处理**:估 σ̂(无接触帧的残差标准差),再做 **soft-threshold
+  `X ← max(X − k·σ̂, 0)`**。如此两个参数各自可解释、可分别做敏感性分析,而不是把两件事混在一个
+  分位数里。
+- **Claude 需提请决定的实现细节**:"无接触帧"如何界定(可用标注的 onset/post 结构、或逐 taxel 的
+  未受载帧)——这是 D1 剩下的唯一实现分歧。
+
+**D2 — 条件同意"修 join 不丢 shard",但两点修正:**
+- **"确认"的程序必须写死**,否则"若确认为 join bug 则修"是**无法证伪**的空话。可执行判据:从错配
+  shard 抽若干 clip,**检查 label 与信号形态是否自洽**(typing 与 pouring 的力曲线不可能相像)。
+  **若按时间戳能重新对上 → join bug,可修;若源 metadata 自身矛盾 → 改 join 也救不回来,只能丢。**
+- **"丢掉 40% 语料"不是最强论据(Claude 原论据被降级)。** 更强的是:**错配 shard 大概率不是随机
+  分布的**(多半集中于某次采集、某个 environment 或某批 participant)。丢掉它们等于**改变了 claim
+  所针对的总体**,而且这一改变**与 D9 的 split 轴共线**——会在同一批 scene/participant 上同时做
+  "删除"与"留出",**外部效度直接塌掉**。这比数据量重要得多。
+- **manifest 需补的字段**(在 ts_start/ts_end 之外):**shard_id / participant / scene / session /
+  源文件 hash / 实测采样率**。hash 用于重下载后仍可审计;**实测采样率**是因为超参按物理单位冻结,
+  **帧率静默漂移会让继承来的 window length 变成另一个超参**。
+
+**D3 — 必须盲裁(blind adjudication)。**
+Claude 已经知道 smooth 仅 233、且补裁能显著扩大 smooth 类——**这个知识本身就构成压力**。因此:
+**裁定时不得查看每个词带多少 clip**,只凭 rubric + 动作语义给判决,**签字、记 commit,然后才 join
+计数**。这不是形式主义,而是把"我按物理判据裁的"从**声称**变成**可查证**。
+
+**执行顺序(用户修正:在最前面插入零成本可行性检查,因其可能直接否决后面的决策)**
+1. **三张交叉表(约 10 分钟,不碰模型)**:① 争议 × 类别;② regime × participant × scene;
+   ③ clip 在 scene 下的嵌套结构。→ 分别决定 **D4 的报表方案是否成立**、**D6/D9 是否相容**、
+   **bootstrap 单位怎么选**。
+2. **D2 定性(按上述诊断程序) ＋ D3 盲裁**(后者完全不依赖数据,可完全并行)
+3. **D1 方案定 + 用 cache 重算**
+4. **D5/D8 现在就锁**(均建议"并列报表 / 写明定义",没有推迟的必要)
+5. **D9/D6 → D7 签字 → 才跑 G1/G2**
+
+**对"扣基线前后对照的纯描述性脚本"(不出任何 R²)**:用户强烈支持,并要求增加三个输出:
+① **整流偏置诊断**——本应闲置的 taxel 在扣基线后非零帧的占比;
+② **每 shard 的 dead / stuck / saturated 计数**;
+③ **每 shard 基线的跨 shard 稳定性**。
+
+**Claude 的执行说明**:三张交叉表中的 "participant" 字段**目前并不存在**(正是 D2 要补的),故该表
+今日只能以 location(shard 基名)作代理并标注此限制。为不违反 D3 的盲裁要求,**Claude 将先完成 36
+个词的盲裁并提交,再运行任何涉及计数的交叉表**。
+
+### 2026-08-16 — 【结果】盲裁后 join 计数:词表 100% 覆盖;并发现 G2 的一个单动作主导风险
+
+用户签字后,36 个盲裁判决已写入 `trait.py` 并**先于计数提交**(commit `7376efd`,时间戳即盲裁证据),
+随后 join 真实 manifest。**结果:**
+```
+clips 2904 | smooth 307 (10.6%) | abrupt 2597 (89.4%) | contentious 836 (28.8%)
+unlabeled 0 | unaudited 0        <- 词表完全覆盖,无 clip 落在分类之外
+剔除争议子集后: smooth 277 | abrupt 1791
+前 12 大动作: picking up 951 / placing 249 / pulling 245[D] / pressing 233 / pushing 154[D]
+              / holding 115 / grasping 107 / adjusting 88[D] / turning 84[D] / moving 78[D]
+              / touching 78 / removing 55
+```
+
+**一、盲裁的实际影响很小,这反而印证了程序的价值。**
+smooth 233 → **307**(+74,+31.8%),abrupt 2393 → **2597**;比例由 1:10.3 变为 **1:8.5**。
+即"补裁会显著扩大 smooth 类"这一**事前担心的压力源在事后被证明基本不存在**——长尾 36 个词总共只
+带 278 clip,且多数落 abrupt 侧。盲裁因此**没有付出任何代价**,却把"我按物理判据裁的"变成了可查证
+的事实。**unaudited = 0**,`trait_class` 不会再对任何真实动作抛异常,**G2 计分守卫解除**。
+
+**二、争议子集的剔除是高度不对称的(影响 D4 的报表方案)。**
+contentious 728 → **836**(+108)。剔除后:**smooth 仅 -30(-9.8%),abrupt -806(-31.0%)**;
+即**争议子集的 96%(806/836)在 abrupt 侧**。因此"全量 vs 仅无争议"这对并列表**不是一次对称的
+稳健性检验**——两表之差几乎全部来自 abrupt 类成分的变化。报告时必须写明这一点,否则读者会误以为
+两类受到同等程度的检验。
+**好消息**:剔除后 smooth 仍有 **277** clip(此前担心它会塌到几十个),**D4 的两表方案在样本量上
+成立**。
+
+**三、【新问题】G2 可能在测"holding vs picking up",而不是"smooth vs abrupt"。**
+- `picking up` 单个动作 **951 clip = 全语料的 32.7%、abrupt 类的 36.6%**;
+- `holding` **115 clip = smooth 类的 37.5%**。
+**两个类各自被单一动作主导**,因此 ΔR² 的很大一部分可能来自"这两个具体动作的差别",而非 trait
+这一抽象属性。这是此前未识别的**构念效度(construct validity)风险**,与既有的类别不平衡问题不同。
+**Claude 建议的应对(待用户裁定)**:(a) 主表之外并列报**逐动作**的 R²,使单动作主导可见;
+(b) 做 **leave-one-action-out** 检验(依次剔除 picking up / holding 重算 ΔR²),若结论翻转则说明
+效应由该动作承载;(c) bootstrap 时按 action 分层(与 OQ-K 的分层轴决定合并考虑)。
+**倾向 (a)+(b)**:两者都零建模成本,且 (b) 直接回答"结论是否只由一个动作撑着"。
+
+**四、统计功效**:smooth 307 vs abrupt 2597。两样本 bootstrap 中 ΔR² 的精度由 smooth 侧的 307
+clip(以及它们跨越多少个 location——bootstrap 单位问题,见 D6/OQ-K)决定,不是由 2904 决定。
+
+### 2026-08-16续 — history 扫描与零填充:澄清一个误解;本轮维持 OQ-H,下轮打印填充比例
+
+用户问"改成 {0.5,1,2} 会不会有更多 split"。**答案是否定的,且这个误解值得记录**:
+`origins()` 只取决于 `min_history`(15)与 `horizon`(30),**与 `t_in` 无关**
+(`lo=min_history; hi=T-horizon; arange(lo,hi,stride)`)。因此**无论 history 取多长,每条 clip
+产生的窗口数完全相同**;变的只是**每个窗口中真实数据与补零的比例**(窗口取
+`f[max(t-t_in+1,0):t+1]`,不足则左侧补零,而特征已 z-score,**补零 = 训练均值**)。
+
+按 clip 长度分布测算(需 `T ≥ 30 + t_in − 1`):
+| history | 需要长度 | 存在完整窗口的 clip 比例 |
+|---|---|---|
+| 0.5 s (t_in=15) | ≥1.47 s | **恒无填充**(min_history 恰为 15,首个 origin 即满足) |
+| 1 s (t_in=30) | ≥1.97 s | 约 75% |
+| 2 s (t_in=60) | ≥2.97 s | 不足 50% |
+| 3 s (t_in=90) | ≥3.97 s | **约 25%** |
+即 **3 秒档下约 3/4 的 clip 没有任何一个未填充窗口**;上次扫描选中 1 s 很可能源于此,而非
+"1 s 信息量最优"。
+
+**决定**:加入 0.5 s 等于**推翻 2026-08-11 对 OQ-H 的裁定**("扫描点为 {1,2,3} s;0.5 s 只是
+harness 的 min_history 下限,不是扫描点"),故**本轮维持 {1,2,3} 不变**。Claude 建议改为
+**打印每档的填充比例**——零风险、不推翻已有裁定,且该组数字正是日后正经决定扫描范围的证据
+(可与各档 val NLL 对照)。**用户已提交本轮作业,同意下一轮再加打印。**
+
+**本轮运行的定位(已与用户确认)**:**D1 之前的参照运行**。价值:(a) 首次跑通 location split +
+4 折;(b) 产出预测曲线与跨折方差;(c) **保留一份未扣基线的结果作为 D1 落地后的对照**,以显示
+"扣基线到底改变了什么"。输出文件名加 `preD1` 后缀以免混淆。
+**不阻塞本轮的事项**(均可用保存的 per-clip 预测事后计算,无需再占 GPU):置信区间、分类别 skill、
+逐动作 R²、leave-one-action-out。
+
+### 2026-08-16续2 — D1 与 D2 的测量工具落地(commits `06ffe0b`, `c6200f7`)
+
+用户已提交本轮 GPU 作业,随即要求开始实现 D1 与 D2。两者都**只出描述性统计,不出任何 R²**。
+
+**D1 — `scripts/opentouch_baseline_report.py`**
+按用户裁定实现"基线用中心统计量 + 噪声用显式阈值"的拆分:
+- **基线 = 逐 taxel、逐 shard 的 median**(b+c 结合)。**"无接触帧"未引入第二个阈值**——那只会
+  把任意性挪到更不显眼处;依据是"受载时间不足一半的 taxel,其静息水平就在自身 median 上",
+  该前提**被测量而非假设**:`duty>0.5` 列数出违反前提的 taxel 数。
+- **σ̂ 单侧估计**:仅取 ≤median 的帧算 MAD × 1.4826(接触只会把读数推高,排除上半部分可使抓握
+  进不到噪声估计)。
+- **soft-threshold `X ← max(X − (base + k·σ̂), 0)`,k 扫描而非固定。**
+- 三个用户要求的诊断全部实现:整流偏置(闲置 taxel 在校正后仍非零的帧占比)、每 shard 的
+  dead/stuck/saturated 计数、跨 shard 基线稳定性(逐 taxel 基线的 shard 间 IQR 及其相对量)。
+
+**合成语料验证(按 2026-08-13 实测结构构造:每格≈2900、稀疏接触)复现了用户预判的失效模式**:
+| k | F 均值 | F 变异系数 | CoP 活动范围 | 整流偏置 |
+|---|---|---|---|---|
+| raw | 742,559 | **0.0059** | 0.008 | — |
+| 0 | 4,946 | **0.803** | 0.489 | **0.423** |
+| 2 | 1,980 | 1.407 | 1.902 | 0.017 |
+| 3 | 1,608 | 1.440 | 2.000 | **0.000** |
+**只扣基线会让闲置 taxel 有 42% 的帧变成非零**;k=2 降至 1.7%,k=3 归零。同时 F 的变异系数从
+0.0059 升到 0.80(135 倍)、CoP 活动范围升 60 倍。**但诊断也暴露反向张力:k=3 时 CoP 范围冲到
+2.0000(整个值域),因存活格子过少使重心跳跃;k=5 又回落到 0.56。故 k 不是越大越好,必须做敏感性
+分析而非拍值。**
+
+**D2 — `scripts/opentouch_label_audit.py`**
+把"若确认为 join bug 则修"中的**"确认"落成可执行程序**(用户指出该词不落地即无法证伪):
+- 报告**每 shard 的错配率**(随机散布 vs 集中,含义不同——这对应用户"错配大概率非随机、丢弃会
+  改变 claim 所针对的总体、且与 split 轴共线"的论据)。
+- 对错配 clip,用 `trait.delta_f_p95`(冲击度)与 `hf_energy_fraction`(高频占比)**检验标签与信号
+  形态是否自洽**;**参照系仅由"peak 一致"的 clip 构建**,避免拿嫌疑样本互相校准。
+- **明确写出它做不到的部分**:判断能否"重新对上"需要 clip 时间戳,而 `extract_opentouch.py`
+  只写了 `fps_est`/`T`、**从未写入时钟** → **重新 join 必须把那些 shard 重新下载回来**。
+- 合成验证:5 个被故意错标为 `pouring` 的冲击型 clip 全部判为 **IMPLAUSIBLE(冲击度为该动作典型
+  值的约 9.8 倍)**,而仅索引错位、标签正确者不被如此标记——**恰好区分"可修的 join bug"与
+  "标签本身错、修不回来"**。
+
+**待用户在 CRC 运行两者以取得真实数字**,再据此(a) 定 k 与基线方案,(b) 对 D2 作出 fix/drop 裁定。
+
+### 2026-08-16续3 — 【D1/D2 真实数据结果】三个可信结论 + 我脚本的两处度量缺陷(已修,需重跑)
+
+**D2(标签审计)可见部分的结论:错的是索引,不是标签。**
+用户贴出的每一条判决**全部是 `consistent`**(placing / pressing / inspecting / adjusting /
+picking up / touching / flipping / sliding),冲击度均落在各自动作典型值的合理倍数内。
+错配集中在**多部分地点**(`hardware_homedepot_p1`、`fablab_ml_p1/p2`),且偏移量很大
+(idx 2686 差 **173 帧**=5.8 s;2806 差 115 帧),与"共用一份标注 CSV、索引相对于合并流"的机制吻合。
+**若整份文件的 IMPLAUSIBLE 计数确为 0/极少,则 D2 的杀伤力大幅下降**:已核查全链路,
+`peak_idx`/`onset_idx`/`post_idx` **仅被绘图脚本用于画竖线**——训练(probGRU)、baseline、split、
+trait 分类**均不读取**;而真正会污染 G2 的 `action` 字段是干净的。
+**待确认后的处置建议**:不必重下那 10 个 shard、不丢弃、不阻塞 G1/G2;仅需在文档中记明"多部分
+地点的标注事件索引基准错误,绘图竖线不可信,任何日后基于 onset/peak/post 切窗口的分析必须先修"。
+(用户尚未贴出错配率表与 IMPLAUSIBLE 计数,结论待其确认。)
+
+**D1(基线报告)三个可信结论:**
+1. **扣基线是决定性的**:`eat_mcdonalds` 的 F 均值 746,325 → 4,918,即**直流占 F 的 99.3%**
+   (比此前估计的 95% 更极端);变异系数 0.0084 → 0.455(**54 倍**);CoP 活动范围 0.041 → 1.24
+   (**30 倍**)——CoP 由"钉在中心"变为真正在动。
+2. **用户方法的前提在全语料上成立**:`duty>0.5` 在**26 个 shard 上全部为 0**,即没有任何 taxel
+   受载超过一半时间,"逐格 median 即无接触段中心统计量"成立。
+3. **`dead = 0`,全语料无一 taxel 读零** → `extract_opentouch.py` docstring 中"169 个活格、死格
+   读 ~0"作为对本 cache 的描述**是错的**(此前仅在单图上怀疑,现为 26 shard 普查结论)。
+   另:基线跨 shard 的相对 IQR 中位仅 **0.009**、p90 **0.050** → **多数格子用全语料基线亦可,
+   但存在一条不稳的尾巴**;脚本原先"必须逐 shard"的措辞下得过满,已改为要求同时读 median 与 p90。
+
+**我脚本的两处度量缺陷(因此当前不能据此定 k),已修复并推送(commit `9bb99a2`):**
+- **σ̂ 在 26 个 shard 上全部退化为 0.00**。根因:**读数是整数量化的**(各 shard 基线皆为整值),
+  未接触时多数 taxel 恒定,故 ≤median 的残差过半为 0,MAD 随之为 0 → **soft-threshold 完全失效**
+  (这解释了 k≥2 后 F 几乎不变、整流偏置卡在 0.055 不降)。**修复:σ̂ 下限取半个量化步长**
+  (量化步长由数据实测,非假设)。
+- **`saturated` 判据无意义**(每 shard 报 212–256/256),它实际测量的是"池化分布有多窄"。
+  **修复:改为"精确等于该格自身最大值的帧占比 > 5%"**——量化数据中真正打满的格子会反复精确停在
+  轨值上,带噪声的正常格子不会。双向验证:浮点合成数据 0 个、量化+人为打满数据检出。
+- `idle`(整流偏置的参照集)由"最大值最小的 5% 格"改为"**相对自身基线的超出量最小的 5% 格**"
+  ——在所有格子都静息于 ~3050 时,按最大值排序排的是基线而非活动度。
+
+**下一步**:用户在 CRC 重跑 `opentouch_baseline_report.py`(修复版)以取得可用的 k 敏感性曲线;
+并从 `~/d2_audit.txt` 取错配率表与 IMPLAUSIBLE 计数以完成 D2 裁定。
+
+### 2026-08-16续4 — 【D1 定 k = 1】【D2 结案:仅 1 个可疑 clip】【新增饱和判别工具】
+
+**一、D2 结案(证据齐全)。**
+错配率表:`sports_dicks_p2` **50/125 = 40.0%**、`sports_dicks_p1` **22/105 = 21.0%**、
+其余 8 个 shard 合计 **30/2674 = 1.1%**、全语料 **102/2904 = 3.5%**。
+→ **`sports_dicks` 一个地点贡献 70.6% 的错配(72/102),而它仅占语料 7.9%;其内部错配率 31.3%,
+语料其余部分 1.1%,相差 28 倍。**该地点正是 `extract_opentouch.py` 点名的**共用一份标注 CSV**
+的那一对,机制与"索引基准相对于合并流"完全吻合。
+标签自洽性:**consistent 46 / IMPLAUSIBLE 仅 1**(`grep -c` 报 2 是因末尾说明文字含该词);
+唯一一条为 `idx 1551, picking up, 3.1x 典型值`,刚过 3.0 阈值,属边缘。
+**→ 裁定:错的是索引基准,不是标签。不重下、不丢弃、不阻塞 G1/G2。**
+依据:(a) `action` 干净 → trait 分类与 probGRU 的 action embedding 未被污染;
+(b) `peak_idx`/`onset_idx`/`post_idx` **经全链路核查仅被绘图脚本使用**;
+(c) **用户的共线性论据被数据坐实**——`sports_dicks` 是一个完整地点(2 shard/230 clip),而 split
+的留出单元恰为地点且总共只有 12 个,丢弃它等于同时删掉一个类别来源与一个留出单元。
+**须记录的限制**:多部分地点的标注事件索引基准错误,绘图竖线不可信;任何日后基于 onset/peak/post
+切窗口的分析必须先重新 join(需把 shard 重新下载回来)。
+
+**二、D1 定 k = 1(主值),k ∈ {0, 2} 作敏感性区间。**
+修复版 k 扫描(`eat_mcdonalds`):
+| k | F 均值 | 较上档减少 | CoPx range | CoPy range |
+|---|---|---|---|---|
+| raw | 746,325 | — | 0.041 | 0.030 |
+| 0 | 4,918 | — | 1.240 | 1.307 |
+| **1** | **1,477** | **−3,441(残差的 70%)** | 1.415 | 1.728 |
+| 2 | 1,220 | −257 | 1.867 | 1.440 |
+| 3 | 1,196 | −24 | 1.867 | 1.444 |
+| 5 | 1,181 | −15 | 1.867 | 1.453 |
+**曲线在 k=1 处有陡峭膝点**(削掉 70% 残差),此后每档仅再削几个百分点。
+**σ̂ 在全部 shard 上恰为 0.50 即所设下限** → 中位 taxel 的非接触读数**完全恒定**,MAD 真为 0。
+因此 **k=1 具有干净的物理含义:阈值 = 基线 + 0.5 计数,对整数数据即"只保留严格高于静息值至少
+1 个计数的读数"——量化数据上最小的有意义阈值**,而非拍值。
+**k≥2 不采纳**:CoPx 冲到 1.867(接近整个 2.0 值域)后不再变化,而 CoPy 由 1.728 回落至 1.440,
+**非单调**,即合成测试中"存活格子过少导致重心跳变"的征兆。
+
+**三、整流偏置诊断在真实数据上恒为 0,已失效(需改造)。**
+原因:`idle` 取"超出自身基线最少的 5% 格",而这些格子**完全恒定**,扣 median 后精确为 0。
+**但这一事实本身回答了用户的担心**:整流偏置源于"低分位数低估基线",而 median 对恒定格子是
+**精确正确**的,故无可整流之噪声;真正的虚假 F 是那 3,441 计数的 ±1 抖动,k=1 恰好清除。
+**改造方向(未实施)**:改为报告"无接触格子对总 F 的贡献量",而非"非零帧占比"。
+
+**四、新增 `scripts/opentouch_saturation_check.py`(commit `4b96c3f`)。**
+D1 census 报 135–241/256 个格子"在自身最大值上停留 >5% 帧",**若为真实削顶,则 F 是被截断的量,
+所有力相关结论都受影响**,故单独测量。判别逻辑(单格无法区分,聚合可以):轨是**同一个值**、
+**跨 shard 相同**(电子学属性而非 session 属性)、**在时间上形成平台**、并**按被钉住的样本比例
+吞掉力**。双向验证:植入 4095 硬件轨 → 单一共享值、跨 shard 一致、at-max 连续长度 p90=13 帧、
+被标记格子承载 **99.2%** 的校正后 F;无轨(仅峰值)→ 14 个各异最大值、跨 shard 不同、95.4% 的
+连续段仅 1 帧、仅占 **0.2%** 的力。
+**待用户在 CRC 运行以定性。**
+
+### 2026-08-16 — 新增只读探查脚本 probe_opentouch_geometry.py(续5 的 (e) 落地)
+
+**触发**:用户把续5 的 Python 片段直接粘进 bash,报 `import: command not found`。遂写成脚本。
+
+**新文件 `scripts/probe_opentouch_geometry.py`** —— 纯只读:不写文件、不拟合、不产出任何 R²,
+**因此不污染 D1~D9 决策链**。分两级,因为**shard 已全部被删**
+(`stream_opentouch.sh:107` / `download_own_copies.sh:110` 的 `rm -f` 是有意设计,为守 home 配额),
+只有 cache 幸存:
+
+- **TIER A(`--cache`,零下载)** 裁决检查 ②。`pose_*.npy` 本就在 cache 里。三项输出:
+  1. **形状 `(T,21,3)` vs `(21,3)`** —— 直接裁定 `extract_opentouch.py:10` 与
+     `probe_opentouch.py:6` 哪个 docstring 有错。**若为 (21,3),逐帧世界轨迹当场出局。**
+  2. **T(pose) 是否 == T(pressure)** —— **续5 遗漏的一点,同样致命**:即便有逐帧 pose,长度不一致
+     就须靠 timestamps 对齐,而 **cache 未存 timestamps** → 那是重抽,不是修补。
+  3. **腕点(landmark 0)是否移动 + 坐标量级** —— 腕点恒 0 ⇒ 腕局部系(只有手指关节,无世界位置);
+     量级区分归一化 / 米 / 毫米。
+- **TIER B(`--shard`,需重下 1 个 shard)** 裁决 ① 与 ③:递归 dump `calibration`
+  (判据:出现覆盖 256/169 taxel 的 (...,3) 形张量才是我们要的 taxel→手面映射;增益/偏置/曲线不是)
+  与 `camera_poses` + `transform_slam_to_rgb`(4x4 SE(3) 则相机侧世界链路闭合)。
+
+**给用户的执行建议**:**先只跑 TIER A**。② 若挂,①③ 无再查必要,省 587 MB 下载。
+TIER B 的 shard 取最小的 `office_csail_p2.hdf5`(ID `1914FdF...`,587 MB),**须下到
+`~/opentouch/probe/` 而非 stream 脚本工作目录**(否则可能被其清理逻辑连带删除),查完立即 rm。
+
+**状态**:脚本仅在本地 mac,**尚未 commit**(已征求用户是否 commit 以便 CRC `git pull`)。**等待指示。**
+
+### 2026-08-16续5 — 【饱和实测:传感器工作在满量程 95%】【用户裁定放弃 D1】【D2 处置实装】
+
+**一、饱和判别结果:全部判据都指向真实硬件削顶,且比预期严重得多。**
+```
+天花板 3072.0 占全部 (格子, shard) 最大值的 94.8%
+per-shard maximum: min 3072.0 max 3072.0  distinct 1 of 26 shards
+at-max 连续长度: median 2  p90 15  max 9430 帧(30 Hz 下 314 秒)
+被标记格子中 65.4% 的样本被钉在顶部;它们承载 38.6% 的校正后 F
+```
+**推论(独立可验证)**:单格上限 3072 → F 的理论上限 = 256×3072 = **786,432**;而实测 **F 均值
+746,325 = 理论上限的 94.9%**。**即阵列静息时已跑在满量程 95%,只剩 5% 余量留给接触。**
+各 shard 基线中位 2978–3072 → 每格可用余量 **0～94 计数(满量程的 0～3.1%)**;
+**`fablab_ml_p2` 的基线中位恰为 3072——该 shard 的中位格子永久贴顶,不携带信息。**
+更正 Claude 自己脚本里的提示语:"轨应是 2 的整数次幂"太窄——**3072 = 3×1024 = 0xC00**,
+同样是固件层面的圆整值。
+
+**二、核查:饱和不是我们抽取造成的。** `extract_opentouch.py:214` 以 **float32** 从 HDF5 读入,
+**231 行 `moments(press)` 在 float32 上计算**,float16 仅用于事后保存原始地图。故 **F/CoP 未被
+我们降精度**。**但连带警告**:D1 的 σ̂ 估计读的是 float16 地图,而 float16 在 [2048,4096) 的间隔为
+**2.0**,故"非接触读数完全恒定、MAD=0"**部分可能是 float16 舍入的假象**;k=1 的方向不变(仍是
+最小有意义阈值),但"σ̂ 真为 0"应降格为"在 float16 精度下不可分辨"。
+
+**三、这改变了问题的性质**:此前以为 D1 是"有直流偏置、扣掉即可";实际是**传感器几乎全程工作在
+饱和区,大量接触信息在采集端即已被削掉**。余量 94 计数、float16 下约 47 个可分辨等级——这解释了
+F 只波动 2–4%、CoP 几乎不动、persistence 难以击败。**扣基线仍能把相对变化从 0.8% 放大到 45%,
+但救不回被削掉的部分。**
+
+**四、用户裁定:放弃 D1,直接在原始 tactile 上跑预测。**
+Claude 已明确告知代价并记录:**不扣基线意味着模型仍在预测一个 99.3% 为常数的信号,skill 会好看
+但与动态无关**。D1 的校正为 cache 的纯函数,**日后可随时补做,无需重新下载**。
+(Claude 曾建议"写信问作者是否有未削顶的原始流"与"按余量筛 shard",用户未采纳,不再追加。)
+
+**五、D2 处置实装(commit `02fb629`)。** 裁定所需证据已齐(见续4),唯一的操作性后果是:
+**全链路中只有两个绘图脚本读取 onset/peak/post**,而在被标记的 clip 上那些竖线会把"peak"画在
+并非峰值处——**比不画更糟**。故:
+- `opentouch_label_audit.py --write-flags PATH` 输出被标记 clip 列表,并写明**哪些字段可信**
+  (action / object_category / scene / shard / T / fps_est)与**哪些不可信**(onset/peak/post)。
+- 两个绘图脚本读取该文件:被标记的 clip **不画事件竖线**,并在行标签上注明
+  `[event idx unreliable]`;文件不存在时行为与此前完全一致。
+**不重下、不丢弃、不阻塞 G1/G2 —— D2 到此结案。**
+
+### 2026-08-16续6 — 【新数据集 d256.zip】远程 ZIP 清单侦察完成;新增 `scripts/crc/fetch_d256.py`
+
+**请求**:浏览 ICLR force-vision 投稿页,开始把该 dataset 下载到 CRC。
+
+#### 一、页面与文件事实(已核实)
+- 页面 `https://sites.google.com/view/iclr-submission-force-vision/` 只给出一个 "New Link"
+  的 Drive 下载链接,**无数据集名、无结构说明、无 license、无下载指引**。
+- Drive 元数据:`d256.zip`,**198,849,542,248 B = 185.2 GiB**,owner `yichenl@mit.edu`
+  (MIT),created 2024-11-15,modified 2025-04-20。
+- **公开可下**:当前拿到的是 "Virus scan warning" 确认页(非配额拒绝页),
+  即 2026-08-12 那次 OpenTouch 的 "too many users downloaded" 尚未在此文件上触发。
+
+#### 二、关键发现:Drive 支持 HTTP Range,于是**不必下载 185 GiB 就能读到清单**
+`curl -r` 实测返回 **HTTP 206 + `Accept-Ranges: bytes` + `Content-Range: .../198849542248`**。
+ZIP 的中央目录记录每个成员的偏移量,故:读尾部 1 MiB 拿 ZIP64 EOCD → 定位中央目录
+(offset 198,826,721,233,大小 22.8 MB)→ 只下这 22.8 MB 即得**全部 187,729 个成员**的
+路径/偏移/压缩尺寸/CRC32。**总成本约 24 MB,而非 185 GiB。**
+
+**清单结果(uncompressed 250.3 GiB / compressed 185.2 GiB):**
+
+| group | files | uncomp GiB | 传输 GiB | 内容 |
+|---|---:|---:|---:|---|
+| signals | 25,473 | 3.89 | 1.10 | 触觉/EMG/姿态 pickle |
+| signals1 | 28,426 | 4.34 | 1.23 | 同上 |
+| signals2 | 26,922 | 4.11 | 1.17 | 同上 |
+| videos | 50,942 | 75.80 | 57.64 | RGB npz,**同时含 256px 与 32px** |
+| videos1 | 28,426 | 83.29 | 63.72 | RGB npz,仅 256px |
+| videos2 | 26,922 | 78.88 | 60.30 | RGB npz,仅 256px |
+
+**⇒ 这个 185 GiB 里 95% 是视频;触觉信号总共只有 12.34 GiB(传输 3.49 GiB)。**
+且三个 signal group 在归档中各自**连续**,故 signals-only 只需 ~8 段长顺序读,而非 80,821 次小请求。
+
+#### 三、内容定性(**已实际 range-取回真实成员并解开验证**,非推测)
+- `signals/<split>/<subject>/<session>/<clip>.p` = pickle dict:
+  `{'signal': {...}, 'label_text': str, 'label_idx': int}`。实例:`label_text='Slice a cucumber'`。
+  `signal` 九路:`tactile-glove-{left,right}` **(16,32,32) f32**、`myo-emg-{l,r}` (16,8)、
+  `myo-acc-{l,r}` (16,3)、`joint-position` (16,28,3)、`{left,right}-hand-pose` (16,24,3)。
+  → **这是 ActionSense(MIT CSAIL)的传感器组合**,16 帧片段,数值已预缩放到 ~[0,1]。
+  本仓已有 `scripts/probe_actionsense.py` 与 `data/actionsense_states`,**接得上**。
+- `videos/.../video_<k>_256.npz` → `arr_0` **(16,256,256,3) uint8**;`_32` → (16,32,32,3)。
+- `signals/ego_4d_{verb,noun}.npy` = **Ego4D 词表**,148 verbs / 112 nouns。
+- 划分:train/val 两分(无 test);受试者 **S01–S05**;`Dataset256/` 单一顶层目录。
+- ⚠️ **`_32` 低分辨率变体只有 `videos` 这一组有**(videos1/videos2 仅 256px)。
+
+**命名解读:`Dataset256`/`d256` 的 "256" 指视频边长 256px,不是 256 taxel**
+(触觉手套是 32×32=1024)。**勿与 OpenTouch 的 256/169 taxel 混淆。**
+
+#### 四、新增 `scripts/crc/fetch_d256.py`(纯 stdlib,CRC 上无需 conda 环境)
+不走 gdown。理由:(a) 单体 185 GiB 无 shard 可流,`stream_opentouch.sh` 的
+"下一片→抽取→删除" 模式失效;(b) 落盘还需**第二份 250.3 GiB** 解压空间;(c) gdown 中途断线
+基本等于重来。改为**按需 range 抽取**:读中央目录 → 选成员 → 合并连续区间为长顺序流 →
+边收边 inflate 边切成员边写盘。
+
+- `--groups signals`(默认)/`signals,videos --lowres` / `all`;`--include <regex>` 可再筛
+  (如 `/val/` 或 `/S0[12]/`);`--plan` 干跑只报量。
+- **每个成员按中央目录的 CRC-32 校验**,不符即删 `.part` 并报错 → 不会留下坏文件。
+- `done.txt` 断点续传,且**只信"磁盘上确实存在该文件"**(被 kill 的任务会让日志跑在磁盘前面)。
+- 每 512 MiB 一个 HTTP 请求;confirm token 过期自动重取,指数退避重试 6 次。
+- 断言远端 size == 198,849,542,248,**Drive 上若重传过文件,缓存偏移全部失效时会立刻报错**而非默默写坏。
+
+**本地实测通过**:`--include '/val/S05/(3|2)/'` 取 962 文件 / 42.07 MiB → 全部 CRC 通过,
+pickle 可正常 load(`Slice a cucumber`,九路 shape 全对);重跑立即识别为已完成、0 传输。
+实测速率 ~1.6 MiB/s(本机沙箱,CRC 侧应更快)——**若真取全量 185 GiB,按此速率约 33 小时,
+必须走 UGE 作业而非前端节点。**
+
+#### 五、未执行的部分与原因
+**我无法从这里连 CRC**:`crcfe01.crc.nd.edu` DNS 不可解析(需校园 VPN/bastion),且
+`~/.ssh` 下**只有 config 与 known_hosts,无私钥**;ND CRC 还要 Duo 二次验证,本会话非交互。
+→ 下载必须由用户在 CRC 上执行,我只交付脚本与指令。**脚本尚未 commit。**
+
+#### OPEN QUESTIONS(等用户裁定后才动)
+1. **取哪个子集?** (a) 仅 signals = 3.49 GiB 传输 / 12.34 GiB 落盘(~40 min);
+   (b) signals + 32px 视频 ≈ +1.2 GiB(但 32px 只覆盖 `videos` 组,视觉侧不完整);
+   (c) 全量 = 185.2 GiB 传输 / **250.3 GiB 落盘**(~33 h)。
+   我的建议:**先 (a)**。本项目历来只用触觉(Session 1 即主动跳过 mp4),而 (c) 的 95%
+   是 RGB;真要做 force-vision 联合建模再补视频,脚本支持增量续取,不浪费已下的部分。
+2. **落盘到哪、配额够吗?** 必须 `/scratch365/$USER/...`,**绝不能进 home**。
+   请在 CRC 跑 `quota` 贴给我——(c) 需要 250 GiB 余量,(a) 只需 13 GiB。
+3. **怎么跑?** (a) 用 `screen`/`tmux` 在前端跑即可;(c) 必须 `qsub` 长作业
+   (且需确认**计算节点是否有外网出口**,ND CRC 一般有,但没验证过)。
+4. **license/引用未知**:页面无任何 license 或使用条款,ICLR 匿名投稿页。取用前是否需要先
+   联系作者(owner `yichenl@mit.edu`)?
+
+#### OPEN QUESTIONS 裁定(2026-08-16,用户)
+- **OQ1 = (a) 仅 signals。** 传输 3.49 GiB → 落盘 12.34 GiB,80,821 个 clip + Ego4D 词表。
+  理由同建议:本项目只用触觉侧;视频日后可用同一脚本增量补取,已下部分不作废。
+- **OQ3 = commit + push,用户在 CRC `git pull` 后执行。**(我无法连 CRC,见上。)
+- **OQ2(scratch 配额)与 OQ4(license/引用)仍未决**,但均不阻塞 (a):12.34 GiB 对
+  `/scratch365` 是小量。OQ4 在**发表/分发前**必须回答,取数自用不阻塞。
+
+**本次 commit 范围**:仅 `scripts/crc/fetch_d256.py` + 本日志。
+`probe_opentouch_geometry.py` 及 `docs/*.png` 等仍留在工作区未提交(前一轮仍在等指示,不顺手带入)。

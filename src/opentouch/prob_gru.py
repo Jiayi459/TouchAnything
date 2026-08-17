@@ -62,7 +62,11 @@ DEFAULT_HP = {"hidden": 48, "epochs": 80, "lr": 0.003, "batch": 64, "seed": 0,
               # roughly a fifth of the wall clock (an epoch is one fwd+bwd pass over TRAIN
               # plus one fwd over TRAIN plus one fwd over VAL; this removes 4/5 of the
               # middle term). Set to 1 to restore the old behaviour.
-              "log_train_every": 5}
+              "log_train_every": 5,
+              # "raw" = ActionSense's five inputs verbatim; "raw+df" adds dF/dt as an
+              # ablation. Recorded in the checkpoint, so a forecast can never be replayed
+              # under the wrong feature set.
+              "features": "raw"}
 OTHER = 0          # reserved embedding id: rare-in-TRAIN or unseen-at-TEST actions
 
 
@@ -85,25 +89,46 @@ def causal_velocity(sig: np.ndarray, fps: float) -> np.ndarray:
     return v
 
 
-def features(Y: np.ndarray, fps: float) -> np.ndarray:
-    """(T,3) raw [F,CoPx,CoPy] -> (T,5) [F, CoPx, CoPy, vx, vy] (ActionSense `raw` mode)."""
+def features(Y: np.ndarray, fps: float, with_df: bool = False) -> np.ndarray:
+    """(T,3) raw [F,CoPx,CoPy] -> (T,5) [F, CoPx, CoPy, vx, vy], ActionSense's `raw` mode.
+
+    WITH_DF APPENDS dF/dt, AS AN ABLATION. ActionSense differences CoP and not force --
+    FEATS_RAW is ("F","x","y","vx","vy") -- and no reason for the asymmetry is recorded;
+    in its highpass mode force is already split into F_slow and F_fast, so the raw mode
+    reads like an omission rather than a decision.
+
+    It matters more here than it did there. With D1 declined the force channel is ~99.3%
+    constant, and a difference is the one view of F that carries no DC at all: it removes
+    the per-clip and per-session resting level that the model would otherwise have to
+    cancel inside its hidden state first. The decoder is already seeded with the last
+    observed target, so the LEVEL is supplied there; handing the encoder the RATE separates
+    the two cleanly. Appended last so the first three columns stay the raw channels.
+    """
     Y = np.asarray(Y, dtype=np.float64)
     v = causal_velocity(Y[:, 1:3], fps)
-    return np.concatenate([Y, v], axis=1)
+    cols = [Y, v]
+    if with_df:
+        cols.append(causal_velocity(Y[:, 0:1], fps))
+    return np.concatenate(cols, axis=1)
 
 
 class FeatNorm:
-    """TRAIN-only z-score for the 5 input features (the harness Norm covers 3 channels)."""
+    """TRAIN-only z-score for the input features (the harness Norm covers 3 channels).
 
-    def __init__(self, mean, std):
-        self.mean, self.std = mean, std
+    Carries `with_df` so the feature layout travels with its normalizer: window_set and
+    predict read it off this object instead of taking a parallel flag that could drift out
+    of step with the statistics it was fitted against."""
+
+    def __init__(self, mean, std, with_df: bool = False):
+        self.mean, self.std, self.with_df = mean, std, with_df
 
     @staticmethod
-    def from_train(cfg: Config, ids: list[int]) -> "FeatNorm":
-        allx = np.concatenate([features(load_target(cfg, i), cfg.fps) for i in ids], 0)
+    def from_train(cfg: Config, ids: list[int], with_df: bool = False) -> "FeatNorm":
+        allx = np.concatenate(
+            [features(load_target(cfg, i), cfg.fps, with_df) for i in ids], 0)
         sd = allx.std(0)
         sd[sd < 1e-8] = 1.0
-        return FeatNorm(allx.mean(0), sd)
+        return FeatNorm(allx.mean(0), sd, with_df)
 
     def z(self, x):
         return (x - self.mean) / self.std
@@ -137,7 +162,7 @@ def window_set(cfg: Config, ids: list[int], t_in: int, norm: Norm, fnorm: FeatNo
     Xs, As, YL, Ys = [], [], [], []
     for i in ids:
         Y = load_target(cfg, i)
-        f = fnorm.z(features(Y, cfg.fps)).astype(np.float32)
+        f = fnorm.z(features(Y, cfg.fps, fnorm.with_df)).astype(np.float32)
         z = norm.z(np.asarray(Y, dtype=np.float64)).astype(np.float32)
         a = _aid(vocab, by_idx, i)
         for t in origins(len(z), cfg):
@@ -210,7 +235,7 @@ def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
     gen = configure_determinism(int(hp["seed"]))
     if norm is None:
         norm = Norm.from_train({i: load_target(cfg, i) for i in train_ids})
-    fnorm = FeatNorm.from_train(cfg, train_ids)
+    fnorm = FeatNorm.from_train(cfg, train_ids, "df" in str(hp.get("features", "raw")))
     vocab, by_idx = action_vocab(cfg, train_ids)
 
     Xtr, Atr, Ltr, Ytr = window_set(cfg, train_ids, t_in, norm, fnorm, vocab, by_idx)
@@ -259,6 +284,8 @@ def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
     history["selected_on"] = "val" if len(Xva) else "train"
     history["n_actions"] = len(vocab)
     history["device"] = str(dev)
+    history["features"] = str(hp.get("features", "raw"))
+    history["n_features"] = int(Xtr.shape[-1])
     return m, norm, fnorm, vocab, by_idx, history
 
 

@@ -126,6 +126,9 @@ def main():
                          "Gaussian NLL verbatim); gru_aggregate = the deterministic arm")
     ap.add_argument("--skip-gru", action="store_true", help="alias for --model none")
     ap.add_argument("--device", help="torch device for prob_gru (default: cuda if present)")
+    ap.add_argument("--features", default="raw", choices=["raw", "raw+df"],
+                    help="prob_gru inputs: raw = ActionSense's five verbatim; raw+df adds "
+                         "dF/dt, the one view of force that carries no DC (ablation)")
     ap.add_argument("--folds", type=int,
                     help="run k grouped folds (every location held out once) instead of "
                          "a single split; location mode only")
@@ -264,6 +267,7 @@ def run_split(cfg, splits, args, tag):
             # gru_aggregate.yaml's -- those belong to the deterministic aggregate model.
             from src.opentouch import prob_gru as P
             hp = dict(P.DEFAULT_HP)
+            hp["features"] = args.features
             if args.epochs:
                 hp["epochs"] = args.epochs
             print(f"prob_gru: history sweep {hs} s on VAL by NLL (epochs={hp['epochs']}) ...")
@@ -274,7 +278,8 @@ def run_split(cfg, splits, args, tag):
                 cfg, splits["train"], splits["val"], t_in, hp, norm=norm, device=args.device)
             preds = P.predict(model, cfg, norm, fnorm, vocab, by_idx, splits["test"], t_in)
             print(f"  best val NLL {hist['best_val_nll']:.6f} | "
-                  f"action vocab {hist['n_actions']} (incl. 'other')")
+                  f"action vocab {hist['n_actions']} (incl. 'other') | "
+                  f"features {hist['features']} ({hist['n_features']} dims)")
 
         R = EV.score_external(cfg, splits, which, preds, results, norm)
         rows += emit_rows(cfg, which, R, results, tag)

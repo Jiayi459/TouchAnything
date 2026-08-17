@@ -121,3 +121,34 @@ def test_determinism(cfg):
         m, norm, fnorm, vocab, by_idx, _ = P.train(cfg, tr, va, t_in=15, hp=hp)
         out.append(P.predict(m, cfg, norm, fnorm, vocab, by_idx, [10], t_in=15)[10])
     assert np.allclose(out[0], out[1])
+
+
+def test_df_ablation_adds_exactly_one_causal_column(cfg):
+    """raw+df appends dF/dt and changes nothing else -- the first five columns must be
+    bit-identical, or the ablation would be confounded with a change to the other inputs."""
+    Y = load_target(cfg, 0)
+    a = P.features(Y, cfg.fps)
+    b = P.features(Y, cfg.fps, with_df=True)
+    assert a.shape[1] == 5 and b.shape[1] == 6
+    assert np.array_equal(a, b[:, :5])
+    # the new column is the causal difference of F, and it is causal
+    assert np.allclose(b[:, 5], P.causal_velocity(Y[:, 0:1], cfg.fps).ravel())
+    assert b[0, 5] == 0
+
+
+def test_df_ablation_reaches_the_model_and_is_recorded(cfg):
+    ids = list(range(12))
+    hp = {"epochs": 1, "hidden": 8, "features": "raw+df"}
+    m, norm, fnorm, vocab, by_idx, hist = P.train(cfg, ids[:8], ids[8:10], t_in=15, hp=hp)
+    assert fnorm.with_df is True
+    assert hist["n_features"] == 6 and hist["features"] == "raw+df"
+    # the normalizer carries the layout, so prediction cannot silently use the other one
+    preds = P.predict(m, cfg, norm, fnorm, vocab, by_idx, ids[10:], t_in=15)
+    assert all(np.isfinite(v).all() for v in preds.values())
+
+
+def test_default_is_still_the_verbatim_five(cfg):
+    ids = list(range(12))
+    _, _, fnorm, _, _, hist = P.train(cfg, ids[:8], ids[8:10], t_in=15,
+                                      hp={"epochs": 1, "hidden": 8})
+    assert fnorm.with_df is False and hist["n_features"] == 5

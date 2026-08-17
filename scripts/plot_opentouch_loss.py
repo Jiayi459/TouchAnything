@@ -55,7 +55,10 @@ def coverage(preds_dir, k_sigma=2.0):
             continue
         y, ors = z["y"], z["origins"]
         mu, sd = z["mu_prob_gru"], z["sigma_prob_gru"]
-        H = mu.shape[1]
+        if len(ors) == 0 or mu.shape[0] == 0:
+            continue          # a clip too short to yield any forecast origin still got a
+        H = mu.shape[1]       # file written for it; there is simply nothing to score
+
         truth = np.stack([y[t + 1:t + 1 + H] for t in ors])
         d = np.abs(truth - mu)
         inside += int((d <= k_sigma * sd).sum()); tot += d.size

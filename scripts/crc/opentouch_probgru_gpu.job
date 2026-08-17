@@ -18,6 +18,7 @@
 # Submit from the repo root:
 #   qsub scripts/crc/opentouch_probgru_gpu.job
 #   qsub -v FOLDS=4,SAVE_PREDS=runs/preds,SAVE_MODEL=runs/models scripts/crc/opentouch_probgru_gpu.job
+#   qsub -v FOLDS=4,EPOCHS=20,FEATURES=raw+df,OUT=docs/cv4_df.csv scripts/crc/opentouch_probgru_gpu.job
 #   qsub -v MAX_CLIPS=300,EPOCHS=2 scripts/crc/opentouch_probgru_gpu.job     # smoke
 # Watch it:
 #   qstat -u $USER ; tail -f logs/opentouch_probgru.o<JOB_ID>
@@ -59,6 +60,7 @@ python -u scripts/run_opentouch_exploratory.py \
     ${FOLDS:+--folds "$FOLDS"} \
     ${SAVE_PREDS:+--save-preds "$SAVE_PREDS"} \
     ${SAVE_MODEL:+--save-model "$SAVE_MODEL"} \
+    ${FEATURES:+--features "$FEATURES"} \
     ${EPOCHS:+--epochs "$EPOCHS"} \
     ${HISTORIES:+--histories "$HISTORIES"} \
     ${MAX_CLIPS:+--max-clips "$MAX_CLIPS"} \

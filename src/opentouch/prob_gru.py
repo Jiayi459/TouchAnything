@@ -55,7 +55,14 @@ from .baselines import origins
 from .dataset import Norm, eligible_clips, load_target
 from .gru_aggregate import configure_determinism
 
-DEFAULT_HP = {"hidden": 48, "epochs": 80, "lr": 0.003, "batch": 64, "seed": 0}
+DEFAULT_HP = {"hidden": 48, "epochs": 80, "lr": 0.003, "batch": 64, "seed": 0,
+              # Train NLL is a curve for the log, not a selection signal -- early stopping
+              # reads VAL only -- so it does not need a full extra pass over TRAIN every
+              # epoch. Evaluating it every 5th epoch keeps the curve readable and drops
+              # roughly a fifth of the wall clock (an epoch is one fwd+bwd pass over TRAIN
+              # plus one fwd over TRAIN plus one fwd over VAL; this removes 4/5 of the
+              # middle term). Set to 1 to restore the old behaviour.
+              "log_train_every": 5}
 OTHER = 0          # reserved embedding id: rare-in-TRAIN or unseen-at-TEST actions
 
 
@@ -230,13 +237,17 @@ def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
             mu, lv = m(Xtr[b].to(dev), Atr[b].to(dev), Ltr[b].to(dev), H)
             loss = nll(mu, lv, Ytr[b].to(dev))
             opt.zero_grad(); loss.backward(); opt.step()
-        tr = _val_nll(m, Xtr, Atr, Ltr, Ytr, H, bs, dev)
-        va = _val_nll(m, Xva, Ava, Lva, Yva, H, bs, dev) if len(Xva) else tr
+        every = max(1, int(hp["log_train_every"]))
+        want_tr = (ep % every == 0) or (ep == n_ep - 1)
+        tr = _val_nll(m, Xtr, Atr, Ltr, Ytr, H, bs, dev) if want_tr else float("nan")
+        va = (_val_nll(m, Xva, Ava, Lva, Yva, H, bs, dev) if len(Xva)
+              else (tr if want_tr else float("nan")))
         history["train_nll"].append(tr); history["val_nll"].append(va)
         improved = va < best
         if verbose:
             el = time.time() - t0
-            print(f"    [t_in={t_in}] epoch {ep + 1}/{n_ep} train {tr:.5f} val {va:.5f}"
+            trs = f"{tr:.5f}" if np.isfinite(tr) else "  --   "
+            print(f"    [t_in={t_in}] epoch {ep + 1}/{n_ep} train {trs} val {va:.5f}"
                   f"{'  *best' if improved else ''} | {el:.0f}s elapsed, "
                   f"~{el / (ep + 1) * (n_ep - ep - 1):.0f}s left", flush=True)
         if improved:

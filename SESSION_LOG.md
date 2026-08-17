@@ -4845,3 +4845,68 @@ pickle 可正常 load(`Slice a cucumber`,九路 shape 全对);重跑立即识别
 
 **本次 commit 范围**:仅 `scripts/crc/fetch_d256.py` + 本日志。
 `probe_opentouch_geometry.py` 及 `docs/*.png` 等仍留在工作区未提交(前一轮仍在等指示,不顺手带入)。
+
+### 2026-08-17 — 分析:probGRU 里 causal_velocity 的物理意义与三条风险(用户提问,无代码改动)
+
+**用户问**:"probGRU 为什么要算 causal velocity?它的物理意义是什么?"
+
+**(1) 物理意义**:vx,vy 是 CoP 在**传感器网格系**的时间导数,单位 **grid-units/s**,刻画
+"载荷在手面上迁移的速度"。**不是手的速度**(握紧物体走过厨房 → vx=vy=0);只有载荷重新分布时非零
+(刀刃行程扫过掌面、物体打滑、滚握)。与 smooth/abrupt trait 的目标一致,作为输入合理。
+**语义歧义(须记住)**:CoP 速度**混淆真·滑移(接触斑相对皮肤材料位移)与纯·重配权(无滑动,仅食指
+压重/拇指压轻即令加权质心移动)**。二者在 `Σp·x/Σp` 的一阶差分里**不可区分**。故不可读作"滑移
+速度",应读作"加权质心迁移率"。
+
+**(2) 为何显式喂 v(GRU 本已看到 CoP 历史)**:**信息论上纯冗余**(`vx[t]` 是窗口内两通道的精确
+线性函数),是**归纳偏置**而非新信息。仍值得,两个理由:(i) 省掉网络必须学的差分算子(hidden=48、
+小数据下不白送);(ii) **更关键是尺度** —— 差分量比水平量小数个量级(F 还压着 DC 偏置),
+`FeatNorm` 对 5 通道**各自** z-score,等于把差分放大回 O(1),避免动态信息被水平项淹没。
+**细节**:`features()` 在整段 clip 上算完再切窗(`prob_gru.py:139-145`),故窗口首帧的 vx 含窗口
+**之前**一个样本 —— 是**过去**信息,严格因果,**不构成泄漏**,但窗口实际携带 t_in+1 个样本历史。
+
+**(3) 为何必须 causal 后向差分 —— 最实质的一点。仓库存在两套速度实现,混用即泄漏:**
+| 用途 | 实现 | 差分 | 可否作模型输入 |
+| 分析 | `physical_state.py:105-106` `derive()` | `np.gradient` **中心差分** | **绝对不可** |
+| 建模 | `prob_gru.py:80` `causal_velocity` | 后向差分 | 可 |
+`np.gradient` **看未来**:作 t 时刻输入则输入窗末帧的 vx 含第一个 target 帧的值 = 直接喂答案。
+**真实的坑**:日后复用 `derive()` 造模型特征会**静默引入泄漏,且 skill 变好看、不报错。**
+
+**(4) 三条问题(新发现,建议纳入待决策)**
+- **(a) 只差分 CoP、不差分 F,在 OpenTouch 上尤其别扭。** `FEATS_RAW` 无 dF/dt。ActionSense 的
+  highpass 模式下说得通(F 已拆 F_slow+F_fast);raw 模式照抄了同一组特征。而 OpenTouch 恰是
+  **F 被 DC 偏置压平**的数据集(D1 未决;`prob_gru.py:22-23` 自承 "much of the target is a
+  constant") —— **唯一能承载 F 动态的量正是 dF/dt,而它恰恰没算。** 未经论证的继承,非 bug。
+- **(b) mask 只管 target,不管 input。** `masking.py` 明说掩的是 TARGET 帧的 metric,且仅在
+  `evaluate.py:77/130/173` 调用;`window_set` 用**未掩蔽**的 `load_target`。低力帧的病态 CoP
+  (比值,低力噪声放大,见 :1041)照样进输入,而差分是高通,**再放大约 2·fps 倍**。评分端干净,
+  输入端不干净。
+- **(c) 与 D1 直接挂钩的副作用(此前无人记录,建议列入 D1 方案):**
+  `extract_opentouch.py:157` 有 `out[F <= 0, 1:] = 0.0`。当前 OT 未扣基线,F 恒为大正数,该行几乎
+  从不触发。**D1 一旦落地(按 shard 扣每 taxel 静息水平并截断到 0),脱离接触的帧整帧归零 → F=0 →
+  CoP 被强制写 0**,于是紧邻帧 vx 出现 `fps·|x|` 量级**假尖峰**(纯数值伪影),且按 (b)**不被任何
+  mask 拦截,直接进模型**。**D1 必须一并决定处置方式**(CoP 置 NaN 前向填充?还是给输入也加掩码?),
+  否则扣基线会顺手向输入通道注入一串脉冲。
+
+**(5) 已核实无误**:`cfg.fps = fps_raw/downsample`(`config.py:28-29`)且 `load_target` 亦
+`st[::cfg.downsample]`(`dataset.py:38`) —— **降采样与帧率一致**,vx 单位确为 grid-units/s,
+无隐藏常数倍错误。
+
+### 2026-08-17 — CRC 上 `--dest /scratch365/$USER` 被拒:非脚本缺陷,是配额/分配问题
+
+**现象**(用户在 `crcfe02` 实跑):
+`PermissionError: [Errno 13] Permission denied: '/scratch365/jhao3'`,发生在 `os.makedirs(dest)`。
+
+**判读**:报错在**创建 `/scratch365/jhao3` 自身**,即该目录**不存在**且用户对 `/scratch365`
+无写权。ND CRC 的 per-user scratch 目录是**管理员预置**的,不能自建 → 要么该账号没有 scratch365
+分配,要么挂载点名字不同。**与 range/ZIP 逻辑无关**,`--plan` 尚未走到网络那一步。
+
+**顺带更正一处我的假设**:CRC 的 netid 是 **`jhao3`**,不是 `~/.ssh/config` 里的 `jh9141`
+(那是 NYU torch 的账号)。README 里用 `$USER` 是对的,但我口头给的路径示例应以 `jhao3` 为准。
+
+**改动**:`fetch_d256.py` 的 `os.makedirs` 包了 `except OSError`,向上找到第一个存在的祖先目录,
+打印**可诊断的**信息(建议命令 + crcsupport 联系方式 + "13 GiB 小到可以先落 `$HOME`")而不是
+裸 Errno 13。捕获 `OSError` 而非 `PermissionError`,因为只读挂载给的是 EROFS(mac 上实测 Errno 30)。
+两条路径均实测:错误路径给出建议文案;正常路径 `--plan` 仍正确(且已识别出先前测试的 962 个文件)。
+
+**待用户提供**:`df -h /scratch365`、`ls -ld /scratch365/$USER`、`quota -s` 的输出,
+以定 dest。**OQ2(落盘位置/配额)由"不阻塞"升级为"当前唯一阻塞项"。**

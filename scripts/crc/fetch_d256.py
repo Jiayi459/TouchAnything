@@ -341,7 +341,19 @@ def main():
                 groups.add(g)
 
     dest = os.path.abspath(args.dest)
-    os.makedirs(dest, exist_ok=True)
+    try:
+        os.makedirs(dest, exist_ok=True)
+    except OSError as exc:   # PermissionError, or EROFS on a read-only mount
+        # On CRC a per-user /scratch365 dir is provisioned, not self-created: if it is absent
+        # you cannot mkdir it, so say where to look rather than dumping a bare Errno 13.
+        blocker = dest
+        while not os.path.exists(blocker):
+            blocker = os.path.dirname(blocker)
+        sys.exit(
+            f"cannot create {dest}: {exc.strerror} under {blocker}\n"
+            f"  Find a writable target:  df -h /scratch365 ; ls -ld /scratch365/$USER ; quota -s\n"
+            f"  If /scratch365/$USER does not exist, request it from crcsupport@nd.edu.\n"
+            f"  Signals-only needs ~13 GiB, so $HOME or /tmp on a node can stand in meanwhile.")
     drive = Drive()
     entries = load_manifest(drive, os.path.join(dest, "manifest.json"))
     members = select(entries, groups, args.lowres,

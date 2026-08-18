@@ -1,0 +1,130 @@
+scope,subset,model,channel,metric,value,ci_lo,ci_hi,n_clips
+overall,all,ar,F_R,R2,0.45563950657713204,,,2843
+overall,all,ar,CoPx_R,R2,0.4686739282576906,,,2843
+overall,all,ar,CoPy_R,R2,0.509659314308217,,,2843
+overall,all,persistence,F_R,R2,0.32455504801531165,,,2843
+overall,all,persistence,CoPx_R,R2,0.2630020321378942,,,2843
+overall,all,persistence,CoPy_R,R2,0.35766455572884415,,,2843
+overall,all,prob_gru,F_R,R2,0.43312086470284417,,,2843
+overall,all,prob_gru,CoPx_R,R2,0.46312588944227595,,,2843
+overall,all,prob_gru,CoPy_R,R2,0.5299520506555673,,,2843
+overall,all,seasonal,F_R,R2,0.318452404279879,,,2843
+overall,all,seasonal,CoPx_R,R2,0.25823895413399467,,,2843
+overall,all,seasonal,CoPy_R,R2,0.3533931590065863,,,2843
+overall,all,ar,F_R,skill_vs_persistence,0.19407126839374456,,,2843
+overall,all,ar,CoPx_R,skill_vs_persistence,0.2790671142776857,,,2843
+overall,all,ar,CoPy_R,skill_vs_persistence,0.23662832237420428,,,2843
+overall,all,prob_gru,F_R,skill_vs_persistence,0.1607322941248268,,,2843
+overall,all,prob_gru,CoPx_R,skill_vs_persistence,0.271539225386067,,,2843
+overall,all,prob_gru,CoPy_R,skill_vs_persistence,0.26822043912307214,,,2843
+overall,all,seasonal,F_R,skill_vs_persistence,-0.00903499791878093,,,2843
+overall,all,seasonal,CoPx_R,skill_vs_persistence,-0.006462810226894433,,,2843
+overall,all,seasonal,CoPy_R,skill_vs_persistence,-0.006649791414055528,,,2843
+trait,smooth,ar,F_R,R2,0.45355661297318806,,,299
+trait,smooth,ar,CoPx_R,R2,0.4650478132296547,,,299
+trait,smooth,ar,CoPy_R,R2,0.507247917361583,,,299
+trait,abrupt,ar,F_R,R2,0.4558591566915251,,,2544
+trait,abrupt,ar,CoPx_R,R2,0.4654600975381,,,2544
+trait,abrupt,ar,CoPy_R,R2,0.5096643065415714,,,2544
+trait,smooth,persistence,F_R,R2,0.3172974761811307,,,299
+trait,smooth,persistence,CoPx_R,R2,0.28909820909057404,,,299
+trait,smooth,persistence,CoPy_R,R2,0.2863977015100133,,,299
+trait,abrupt,persistence,F_R,R2,0.32540171300923515,,,2544
+trait,abrupt,persistence,CoPx_R,R2,0.25585462915639734,,,2544
+trait,abrupt,persistence,CoPy_R,R2,0.3662212764147198,,,2544
+trait,smooth,prob_gru,F_R,R2,0.4186781000024993,,,299
+trait,smooth,prob_gru,CoPx_R,R2,0.4390954471471916,,,299
+trait,smooth,prob_gru,CoPy_R,R2,0.5466248163343664,,,299
+trait,abrupt,prob_gru,F_R,R2,0.4348575070482834,,,2544
+trait,abrupt,prob_gru,CoPx_R,R2,0.46163832292463236,,,2544
+trait,abrupt,prob_gru,CoPy_R,R2,0.5275735652000935,,,2544
+trait,smooth,seasonal,F_R,R2,0.30403214179155835,,,299
+trait,smooth,seasonal,CoPx_R,R2,0.289626058036235,,,299
+trait,smooth,seasonal,CoPy_R,R2,0.28504787559755496,,,299
+trait,abrupt,seasonal,F_R,R2,0.3201786467002502,,,2544
+trait,abrupt,seasonal,CoPx_R,R2,0.250602754240956,,,2544
+trait,abrupt,seasonal,CoPy_R,R2,0.3615805161881632,,,2544
+trait,delta,ar,F_R,dR2,-0.0023025437183370467,-0.06331423705823336,0.050238625439947227,2843
+trait,delta,ar,CoPx_R,dR2,-0.00041228430844530983,-0.06375910832447941,0.05052720996741296,2843
+trait,delta,ar,CoPy_R,dR2,-0.002416389179988321,-0.1571278315267163,0.09336538328437172,2843
+trait,delta,persistence,F_R,dR2,-0.00810423682810446,-0.0977645084733154,0.07565928560652724,2843
+trait,delta,persistence,CoPx_R,dR2,0.033243579934176704,-0.09015504689894185,0.14018474514512608,2843
+trait,delta,persistence,CoPy_R,dR2,-0.07982357490470648,-0.4739108191767064,0.14120296454801326,2843
+trait,delta,prob_gru,F_R,dR2,-0.016179407045784133,-0.09045393274619251,0.04692182527335926,2843
+trait,delta,prob_gru,CoPx_R,dR2,-0.02254287577744074,-0.10887589728394147,0.0473288450756854,2843
+trait,delta,prob_gru,CoPy_R,dR2,0.019051251134272973,-0.04875999405641224,0.07886002094239415,2843
+trait,delta,seasonal,F_R,dR2,-0.01614650490869185,-0.11403339323525818,0.07013061926942854,2843
+trait,delta,seasonal,CoPx_R,dR2,0.03902330379527896,-0.08393800522228,0.14575787303489748,2843
+trait,delta,seasonal,CoPy_R,dR2,-0.07653264059060827,-0.4701205175886191,0.14417811752533405,2843
+trait,delta_no_contentious,ar,F_R,dR2,-0.02510062012027603,,,2027
+trait,delta_no_contentious,ar,CoPx_R,dR2,-0.017235196959474286,,,2027
+trait,delta_no_contentious,ar,CoPy_R,dR2,-0.04414287121192362,,,2027
+trait,delta_no_contentious,persistence,F_R,dR2,-0.05116801929333248,,,2027
+trait,delta_no_contentious,persistence,CoPx_R,dR2,-0.017575059494843726,,,2027
+trait,delta_no_contentious,persistence,CoPy_R,dR2,-0.18893299777175032,,,2027
+trait,delta_no_contentious,prob_gru,F_R,dR2,-0.04801478755199873,,,2027
+trait,delta_no_contentious,prob_gru,CoPx_R,dR2,-0.05682856427908567,,,2027
+trait,delta_no_contentious,prob_gru,CoPy_R,dR2,-0.022847618863797492,,,2027
+trait,delta_no_contentious,seasonal,F_R,dR2,-0.06468239274590548,,,2027
+trait,delta_no_contentious,seasonal,CoPx_R,dR2,-0.016970971233984722,,,2027
+trait,delta_no_contentious,seasonal,CoPy_R,dR2,-0.190537590843342,,,2027
+action,picking up,ar,mean,R2,0.4987397194054893,,,931
+action,picking up,persistence,mean,R2,0.3531131320141469,,,931
+action,picking up,prob_gru,mean,R2,0.5103182828133657,,,931
+action,picking up,seasonal,mean,R2,0.3531131320141469,,,931
+action,placing,ar,mean,R2,0.5056406007658799,,,246
+action,placing,persistence,mean,R2,0.3595625458968114,,,246
+action,placing,prob_gru,mean,R2,0.5018583370514896,,,246
+action,placing,seasonal,mean,R2,0.3595625458968114,,,246
+action,pulling,ar,mean,R2,0.4269630242605565,,,240
+action,pulling,persistence,mean,R2,0.2116963004303503,,,240
+action,pulling,prob_gru,mean,R2,0.42230069053543245,,,240
+action,pulling,seasonal,mean,R2,0.1788729936081106,,,240
+action,pressing,ar,mean,R2,0.41566972210586944,,,227
+action,pressing,persistence,mean,R2,0.27926713039196144,,,227
+action,pressing,prob_gru,mean,R2,0.38237358217663386,,,227
+action,pressing,seasonal,mean,R2,0.27926713039196144,,,227
+action,pushing,ar,mean,R2,0.438166844524996,,,150
+action,pushing,persistence,mean,R2,0.23108628902705505,,,150
+action,pushing,prob_gru,mean,R2,0.4150286624357833,,,150
+action,pushing,seasonal,mean,R2,0.23239389067178806,,,150
+action,holding,ar,mean,R2,0.46138026034331253,,,112
+action,holding,persistence,mean,R2,0.3122848941199162,,,112
+action,holding,prob_gru,mean,R2,0.42407669248219726,,,112
+action,holding,seasonal,mean,R2,0.3030926880059943,,,112
+action,grasping,ar,mean,R2,0.47986398887898246,,,106
+action,grasping,persistence,mean,R2,0.3125192028184699,,,106
+action,grasping,prob_gru,mean,R2,0.4832992524753646,,,106
+action,grasping,seasonal,mean,R2,0.3125192028184699,,,106
+action,adjusting,ar,mean,R2,0.48853544958447154,,,83
+action,adjusting,persistence,mean,R2,0.4132199379563352,,,83
+action,adjusting,prob_gru,mean,R2,0.39832169357510194,,,83
+action,adjusting,seasonal,mean,R2,0.4132199379563352,,,83
+action,turning,ar,mean,R2,0.3285827284969232,,,83
+action,turning,persistence,mean,R2,-0.021702411675340223,,,83
+action,turning,prob_gru,mean,R2,0.26650900010212525,,,83
+action,turning,seasonal,mean,R2,-0.06312240325808904,,,83
+action,touching,ar,mean,R2,0.526611874630493,,,78
+action,touching,persistence,mean,R2,0.46479827935804047,,,78
+action,touching,prob_gru,mean,R2,0.545682415010805,,,78
+action,touching,seasonal,mean,R2,0.46479827935804047,,,78
+action,moving,ar,mean,R2,0.4228275586281165,,,77
+action,moving,persistence,mean,R2,0.2014766383050369,,,77
+action,moving,prob_gru,mean,R2,0.44627886137058703,,,77
+action,moving,seasonal,mean,R2,0.20167233331553183,,,77
+action,removing,ar,mean,R2,0.45414764640651456,,,53
+action,removing,persistence,mean,R2,0.2796627415458637,,,53
+action,removing,prob_gru,mean,R2,0.48565803086789866,,,53
+action,removing,seasonal,mean,R2,0.2796627415458637,,,53
+action,sliding,ar,mean,R2,0.4267477940597435,,,52
+action,sliding,persistence,mean,R2,0.16174814716399902,,,52
+action,sliding,prob_gru,mean,R2,0.4081502922417348,,,52
+action,sliding,seasonal,mean,R2,0.1534013213828782,,,52
+loao,drop picking up,ar,mean,dR2,0.014501662268312251,,,1912
+loao,drop holding,ar,mean,dR2,-0.0007839648735678365,,,2731
+loao,drop picking up,persistence,mean,dR2,0.007541077264379803,,,1912
+loao,drop holding,persistence,mean,dR2,-0.034647177816540774,,,2731
+loao,drop picking up,prob_gru,mean,dR2,0.01772024512632468,,,1912
+loao,drop holding,prob_gru,mean,dR2,0.004985748822227132,,,2731
+loao,drop picking up,seasonal,mean,dR2,0.01072492046249962,,,1912
+loao,drop holding,seasonal,mean,dR2,-0.03109617208934153,,,2731

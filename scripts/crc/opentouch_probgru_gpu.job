@@ -19,6 +19,7 @@
 #   qsub scripts/crc/opentouch_probgru_gpu.job
 #   qsub -v FOLDS=4,SAVE_PREDS=runs/preds,SAVE_MODEL=runs/models scripts/crc/opentouch_probgru_gpu.job
 #   qsub -v FOLDS=4,EPOCHS=20,FEATURES=raw+df,OUT=docs/cv4_df.csv scripts/crc/opentouch_probgru_gpu.job
+#   qsub -v FOLDS=4,EPOCHS=20,MODEL=map_all,OUT=docs/cv4_map.csv scripts/crc/opentouch_probgru_gpu.job
 #   qsub -v MAX_CLIPS=300,EPOCHS=2 scripts/crc/opentouch_probgru_gpu.job     # smoke
 # Watch it:
 #   qstat -u $USER ; tail -f logs/opentouch_probgru.o<JOB_ID>

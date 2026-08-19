@@ -1,0 +1,121 @@
+"""Tests for src/opentouch/tactile_map.py -- flatten / cnn / aggregate on the map.
+
+Needs torch, so it lives in its own file behind a module-level skip like the other two.
+"""
+import json
+import os
+import sys
+
+import numpy as np
+import pytest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    import torch
+except Exception as exc:                                             # pragma: no cover
+    pytest.skip(f"torch unavailable ({type(exc).__name__})", allow_module_level=True)
+
+from src.actionsense.eval_harness.config import load_config           # noqa: E402
+from src.opentouch import tactile_map as TM                           # noqa: E402
+from src.opentouch.baselines import origins                           # noqa: E402
+from src.opentouch.dataset import Norm, load_target                   # noqa: E402
+
+
+@pytest.fixture
+def cfg(tmp_path):
+    rng = np.random.default_rng(0)
+    recs = []
+    for i in range(12):
+        T = 90
+        t = np.arange(T) / 30.0
+        st = np.zeros((T, 1, 6), np.float32)
+        st[:, 0, 0] = 50 + 10 * np.sin(2 * np.pi * 0.7 * t + i)
+        st[:, 0, 1] = 0.2 * np.sin(2 * np.pi * 0.5 * t + i)
+        st[:, 0, 2] = 0.2 * np.cos(2 * np.pi * 0.3 * t + i)
+        np.save(tmp_path / f"state_{i}.npy", st)
+        # a resting level plus a moving contact blob, like the real corpus
+        yy, xx = np.mgrid[0:16, 0:16]
+        m = np.full((T, 1, 16, 16), 3050.0, np.float16)
+        for k in range(30, 60):
+            m[k, 0] += (200 * np.exp(-((xx - 8) ** 2 + (yy - 8) ** 2) / 6)).astype(np.float16)
+        np.save(tmp_path / f"clip_{i}.npy", m)
+        recs.append({"idx": i, "shard": f"sh{i % 2}", "clip_id": f"c{i}", "scene": "s",
+                     "action": "holding", "object_category": "cup", "environment": "e",
+                     "T": T, "fps_est": 30.0, "has_clip": True, "has_pose": False})
+    (tmp_path / "manifest.jsonl").write_text("\n".join(json.dumps(r) for r in recs) + "\n")
+    text = open("configs/opentouch/eval_harness.yaml").read().replace(
+        "states_root: data/opentouch_states", f"states_root: {tmp_path}")
+    p = tmp_path / "h.yaml"; p.write_text(text)
+    return load_config(str(p))
+
+
+def test_encoders_differ_only_in_the_encoder(cfg):
+    """models.py's stated design: one GRU and one probabilistic head behind all three."""
+    hp = dict(TM.DEFAULT_HP, d=8, hidden=8)
+    ms = {e: TM.build_model(e, cfg, hp) for e in ("flatten", "cnn", "aggregate")}
+    for e, m in ms.items():
+        assert isinstance(m, TM.Seq2Seq)
+        assert m.gru.hidden_size == 8 and m.mu.out_features == cfg.horizon * 3
+        assert m.lv.out_features == cfg.horizon * 3          # every arm is probabilistic
+    assert type(ms["flatten"].encoder) is TM.FlattenEncoder
+    assert type(ms["cnn"].encoder) is TM.CNNEncoder
+
+
+def test_grid_is_one_hand_sixteen(cfg):
+    assert (TM.IN_CH, TM.GRID, TM.FLAT) == (1, 16, 256)
+    x = torch.randn(2, 5, 1, 16, 16)
+    for enc in (TM.FlattenEncoder(8), TM.CNNEncoder(8)):
+        assert enc(x).shape == (2, 5, 8)
+
+
+def test_baseline_is_the_per_taxel_median_per_shard(cfg):
+    b = TM.taxel_baselines(cfg, list(range(12)))
+    assert set(b) == {"sh0", "sh1"}
+    # the planted resting level is 3050 and contact is a minority of frames, so the median
+    # must sit at rest rather than somewhere between rest and contact
+    for v in b.values():
+        assert np.allclose(np.median(v), 3050.0, atol=2.0)
+    m = TM.load_map(cfg, 0, b["sh0"])
+    assert m.shape[1:] == (1, 16, 16) and (m >= 0).all()
+    assert m[0].max() < 5.0 and m[45].max() > 50.0        # rest ~0 after removal, contact not
+
+
+def test_windows_are_residual_and_left_padded(cfg):
+    norm = Norm.from_train({i: load_target(cfg, i) for i in range(8)})
+    inp, _ = TM.build_inputs(cfg, "aggregate", [0], [0], norm, 10.0)
+    X, Y = TM.windows(cfg, [0], 40, inp, norm)
+    n_or = len(origins(len(load_target(cfg, 0)), cfg))
+    assert X.shape == (n_or, 40, 3) and Y.shape == (n_or, cfg.horizon, 3)
+    assert torch.allclose(X[0, :25], torch.zeros(25, 3))     # early origin is left-padded
+    z = norm.z(np.asarray(load_target(cfg, 0), dtype=np.float64))
+    t = int(origins(len(z), cfg)[0])
+    assert np.allclose(Y[0].numpy(), (z[t + 1:t + 1 + cfg.horizon] - z[t]), atol=1e-5)
+
+
+@pytest.mark.parametrize("enc", ["aggregate", "flatten", "cnn"])
+def test_train_and_predict_align_with_the_harness(cfg, enc):
+    tr, va, te = list(range(8)), [8, 9], [10, 11]
+    hp = dict(TM.DEFAULT_HP, d=8, hidden=8, epochs=1)
+    m, norm, mnorm, hist = TM.train(cfg, enc, tr, va, t_in=15, hp=hp)
+    preds = TM.predict(m, cfg, enc, norm, mnorm, te, 15, tr + va)
+    for i in te:
+        n_or = len(origins(len(load_target(cfg, i)), cfg))
+        assert preds[i].shape == (n_or, cfg.horizon, 3)
+        assert np.isfinite(preds[i]).all()
+    assert hist["encoder"] == enc and len(hist["val_mse"]) == 1
+
+
+def test_a_zero_residual_reproduces_persistence(cfg):
+    """The residual convention is what makes 'predict nothing' equal persistence; if the
+    anchor were dropped the arm would be worse than the baseline it is measured against."""
+    tr, te = list(range(10)), [10]
+    norm = Norm.from_train({i: load_target(cfg, i) for i in tr})
+    m, _, mnorm, _ = TM.train(cfg, "aggregate", tr, [], t_in=15,
+                              hp=dict(TM.DEFAULT_HP, d=4, hidden=4, epochs=1), norm=norm)
+    with torch.no_grad():                       # force the residual head to output zero
+        m.mu.weight.zero_(); m.mu.bias.zero_()
+    preds = TM.predict(m, cfg, "aggregate", norm, mnorm, te, 15, tr)
+    Y = np.asarray(load_target(cfg, te[0]), dtype=np.float64)
+    ors = origins(len(Y), cfg)
+    assert np.allclose(preds[te[0]], np.repeat(Y[ors][:, None, :], cfg.horizon, axis=1),
+                       atol=1e-6)

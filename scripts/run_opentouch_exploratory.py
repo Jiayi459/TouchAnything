@@ -121,7 +121,8 @@ def main():
     ap.add_argument("--histories", help="override the history sweep, e.g. 1,2,3 (seconds)")
     ap.add_argument("--max-clips", type=int, help="subsample the corpus (smoke runs)")
     ap.add_argument("--model", default="prob_gru",
-                    choices=["prob_gru", "gru_aggregate", "both", "none"],
+                    choices=["prob_gru", "gru_aggregate", "both", "none",
+                             "flatten", "cnn", "map_aggregate", "map_all"],
                     help="prob_gru = the ActionSense probabilistic GRU (architecture and "
                          "Gaussian NLL verbatim); gru_aggregate = the deterministic arm")
     ap.add_argument("--skip-gru", action="store_true", help="alias for --model none")
@@ -248,14 +249,38 @@ def run_split(cfg, splits, args, tag):
 
     ext, sig, kept = {}, {}, {}
     want = [] if (args.skip_gru or args.model == "none") else (
-        ["prob_gru", "gru_aggregate"] if args.model == "both" else [args.model])
+        ["prob_gru", "gru_aggregate"] if args.model == "both"
+        else (["map_aggregate", "flatten", "cnn"] if args.model == "map_all"
+              else [args.model]))
     for which in want:
         import torch  # noqa: F401  (imported late so --model none works without it)
         gcfg = load_config(args.gru_config)
         hs = ([float(x) for x in args.histories.split(",")] if args.histories
               else gcfg.raw["sweep"]["histories_s"])
 
-        if which == "gru_aggregate":
+        if which in ("flatten", "cnn", "map_aggregate"):
+            # The tactile_map family: three encoders behind one probabilistic head, so the
+            # encoder is the only variable (src/opentouch/tactile_map.py).
+            from src.opentouch import tactile_map as TM
+            enc = "aggregate" if which == "map_aggregate" else which
+            hp = dict(TM.DEFAULT_HP)
+            if args.epochs:
+                hp["epochs"] = args.epochs
+            print(f"{which}: history sweep {hs} s on VAL by NLL (epochs={hp['epochs']}) ...")
+            scores = {}
+            for sec in hs:
+                ti = max(1, int(round(sec * cfg.fps)))
+                *_, h = TM.train(cfg, enc, splits["train"], splits["val"], ti, hp,
+                                 norm=norm, device=args.device)
+                scores[ti] = h["best_val_nll"]
+            t_in = min(scores, key=scores.get)
+            print(f"  t_in={t_in} ({t_in / cfg.fps:.1f} s); val NLL {scores}")
+            model, _, mnorm, hist = TM.train(cfg, enc, splits["train"], splits["val"],
+                                             t_in, hp, norm=norm, device=args.device)
+            preds = TM.predict(model, cfg, enc, norm, mnorm, splits["test"], t_in,
+                               splits["train"] + splits["val"])
+            print(f"  best val NLL {hist['best_val_nll']:.6f}")
+        elif which == "gru_aggregate":
             from src.opentouch import gru_aggregate as G
             hp = dict(gcfg.raw["model"], **gcfg.raw["optim"])
             if args.epochs:

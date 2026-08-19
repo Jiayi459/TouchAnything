@@ -219,14 +219,25 @@ def nll(mu: torch.Tensor, lv: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
 
 
 @torch.no_grad()
-def _val_nll(m, X, A, YL, Y, H, batch, dev) -> float:
+def _val_scores(m, X, A, YL, Y, H, batch, dev) -> tuple[float, float]:
+    """(mean NLL, mean squared error of the MEAN).
+
+    Both, because they can move in opposite directions and the difference is diagnostic.
+    The Gaussian NLL contains (y-mu)^2 * exp(-lv): a model can lower it on TRAIN by
+    shrinking sigma where it happens to be right, and that same shrinkage makes the term
+    explode wherever it is wrong on VAL. So a VAL NLL that climbs while VAL MSE stays flat
+    is not the mean getting worse -- it is the variance head getting overconfident, which
+    calls for a different fix and, more urgently, means early stopping on NLL is selecting
+    weights by a criterion the harness does not score (it scores point error only)."""
     m.eval()
-    tot = n = 0.0
+    tot_nll = tot_se = n = cnt = 0.0
     for i in range(0, len(X), batch):
+        yb = Y[i:i + batch].to(dev)
         mu, lv = m(X[i:i + batch].to(dev), A[i:i + batch].to(dev),
                    YL[i:i + batch].to(dev), H)
-        tot += float(nll(mu, lv, Y[i:i + batch].to(dev))) * len(mu); n += len(mu)
-    return tot / max(n, 1.0)
+        tot_nll += float(nll(mu, lv, yb)) * len(mu); n += len(mu)
+        tot_se += float(((mu - yb) ** 2).sum()); cnt += yb.numel()
+    return tot_nll / max(n, 1.0), tot_se / max(cnt, 1.0)
 
 
 # ---------------------------------------------------------------------------- training --
@@ -263,7 +274,8 @@ def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
                 dropout=float(hp["dropout"])).to(dev)
     opt = torch.optim.Adam(m.parameters(), lr=hp["lr"],
                            weight_decay=float(hp["weight_decay"]))
-    best, best_state, history = np.inf, None, {"train_nll": [], "val_nll": []}
+    best, best_state, history = np.inf, None, {"train_nll": [], "val_nll": [],
+                                               "val_mse": []}
     t0 = time.time()
     for ep in range(n_ep):
         m.train()
@@ -275,15 +287,20 @@ def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
             opt.zero_grad(); loss.backward(); opt.step()
         every = max(1, int(hp["log_train_every"]))
         want_tr = (ep % every == 0) or (ep == n_ep - 1)
-        tr = _val_nll(m, Xtr, Atr, Ltr, Ytr, H, bs, dev) if want_tr else float("nan")
-        va = (_val_nll(m, Xva, Ava, Lva, Yva, H, bs, dev) if len(Xva)
-              else (tr if want_tr else float("nan")))
+        tr = (_val_scores(m, Xtr, Atr, Ltr, Ytr, H, bs, dev)[0] if want_tr
+              else float("nan"))
+        if len(Xva):
+            va, va_mse = _val_scores(m, Xva, Ava, Lva, Yva, H, bs, dev)
+        else:
+            va, va_mse = (tr if want_tr else float("nan")), float("nan")
         history["train_nll"].append(tr); history["val_nll"].append(va)
+        history["val_mse"].append(va_mse)
         improved = va < best
         if verbose:
             el = time.time() - t0
             trs = f"{tr:.5f}" if np.isfinite(tr) else "  --   "
-            print(f"    [t_in={t_in}] epoch {ep + 1}/{n_ep} train {trs} val {va:.5f}"
+            print(f"    [t_in={t_in}] epoch {ep + 1}/{n_ep} train {trs} val {va:.5f} "
+                  f"mse {va_mse:.5f}"
                   f"{'  *best' if improved else ''} | {el:.0f}s elapsed, "
                   f"~{el / (ep + 1) * (n_ep - ep - 1):.0f}s left", flush=True)
         if improved:
@@ -292,6 +309,12 @@ def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
         m.load_state_dict(best_state)
     m.eval()
     history["best_val_nll"] = float(best)
+    vm = np.asarray(history["val_mse"], dtype=float)
+    if np.isfinite(vm).any():
+        history["best_val_mse"] = float(np.nanmin(vm))
+        history["best_val_mse_epoch"] = int(np.nanargmin(vm)) + 1
+        history["best_val_nll_epoch"] = int(np.nanargmin(
+            np.asarray(history["val_nll"], dtype=float))) + 1
     history["selected_on"] = "val" if len(Xva) else "train"
     history["n_actions"] = len(vocab)
     history["device"] = str(dev)

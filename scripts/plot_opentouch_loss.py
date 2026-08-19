@@ -107,6 +107,8 @@ def main():
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.2))
     ax, axs = axes
+    ax2 = ax.twinx()
+    ax2.set_ylabel("VAL MSE (dotted, + = its own best)", fontsize=8)
 
     for name, ck in cks:
         h = ck.get("history", {})
@@ -123,6 +125,14 @@ def main():
                     color=line.get_color(), label=f"{tag} train")
         b = int(np.nanargmin(va))
         ax.plot(ep[b], va[b], "*", ms=12, color=line.get_color())
+        # VAL MSE on a twin axis: if it stays flat while NLL climbs, the mean is fine and
+        # only the variance head is degrading -- and early stopping on NLL is then picking
+        # weights by a criterion the harness never scores.
+        vm = np.asarray(h.get("val_mse", []), dtype=float)
+        if vm.size == va.size and np.isfinite(vm).any():
+            ax2.plot(ep, vm, lw=1.0, ls=":", color=line.get_color(), alpha=0.8)
+            ax2.plot(ep[int(np.nanargmin(vm))], np.nanmin(vm), "P", ms=7,
+                     color=line.get_color())
 
         sw = ck.get("sweep") or {}
         if sw:
@@ -133,8 +143,8 @@ def main():
                      color=axs.lines[-1].get_color())
 
     ax.set_xlabel("epoch"); ax.set_ylabel("Gaussian NLL")
-    ax.set_title("probGRU training curves (star = kept weights)\n"
-                 "train sampled every 5th epoch", fontsize=10)
+    ax.set_title("probGRU training curves — solid/dashed = NLL, dotted = VAL MSE\n"
+                 "star = weights kept (min VAL NLL);  + = min VAL MSE", fontsize=10)
     ax.legend(fontsize=7, ncol=2); ax.grid(alpha=0.25)
     axs.set_xlabel("input history (s)"); axs.set_ylabel("best VAL NLL")
     axs.set_title("history sweep, chosen on VAL\n"

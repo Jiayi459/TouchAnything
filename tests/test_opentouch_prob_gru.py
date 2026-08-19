@@ -173,3 +173,14 @@ def test_regularisers_are_off_by_default_and_reach_the_model(cfg):
                                 hp={"epochs": 1, "hidden": 8, "weight_decay": 1e-3,
                                     "dropout": 0.2})
     assert h1["weight_decay"] == 1e-3 and h1["dropout"] == 0.2
+
+
+def test_val_mse_is_tracked_beside_val_nll(cfg):
+    """The two can move apart, and which epoch each prefers is the diagnostic: NLL can be
+    ruined by an overconfident sigma while the mean is unchanged."""
+    ids = list(range(12))
+    *_, h = P.train(cfg, ids[:8], ids[8:10], t_in=15, hp={"epochs": 3, "hidden": 8})
+    assert len(h["val_mse"]) == 3 and np.isfinite(h["val_mse"]).all()
+    assert "best_val_mse_epoch" in h and "best_val_nll_epoch" in h
+    # the MSE is of the MEAN only: it must not depend on the variance head
+    assert h["best_val_mse"] <= max(h["val_mse"]) + 1e-12

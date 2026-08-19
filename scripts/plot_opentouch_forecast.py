@@ -52,6 +52,13 @@ def main():
     ap.add_argument("--history-s", type=float, default=3.0,
                     help="seconds of run-up to draw before the origin")
     ap.add_argument("--out", default="docs/opentouch_forecast.png")
+    ap.add_argument("--per-channel", action="store_true",
+                    help="one figure per channel (out stem gets _F_R etc.) instead of one "
+                         "figure with the channels side by side")
+    ap.add_argument("--compare", metavar="DIR",
+                    help="a second --save-preds directory; its prob_gru mean is overlaid so "
+                         "two arms can be read on the same clip and origin")
+    ap.add_argument("--compare-label", default="compare")
     a = ap.parse_args()
 
     files = sorted(glob.glob(os.path.join(a.preds, "clip_*.npz")))
@@ -69,9 +76,20 @@ def main():
     import matplotlib.pyplot as plt
 
     z0, _ = load(files[0])
-    chans = [str(c) for c in z0["channels"]]
+    all_chans = [str(c) for c in z0["channels"]]
+    groups = ([[i] for i in range(len(all_chans))] if a.per_channel
+              else [list(range(len(all_chans)))])
+    stem, ext = os.path.splitext(a.out)
+    for g in groups:
+        out = f"{stem}_{all_chans[g[0]]}{ext}" if a.per_channel else a.out
+        draw(files, g, all_chans, a, plt, out)
+
+
+def draw(files, cols_idx, all_chans, a, plt, out):
+    chans = [all_chans[i] for i in cols_idx]
     fig, axes = plt.subplots(len(files), len(chans), squeeze=False,
-                             figsize=(4.6 * len(chans), 2.9 * len(files)))
+                             figsize=(6.2 * len(chans) if len(chans) == 1
+                                      else 4.6 * len(chans), 2.9 * len(files)))
 
     for row, path in enumerate(files):
         z, models = load(path)
@@ -86,24 +104,35 @@ def main():
         t_hist = np.arange(lo, t0 + 1) / fps
         t_fut = np.arange(t0 + 1, t0 + 1 + H) / fps
 
-        for col, ch in enumerate(chans):
+        other = None
+        if a.compare:
+            p2 = os.path.join(a.compare, os.path.basename(path))
+            if os.path.exists(p2):
+                other = np.load(p2, allow_pickle=True)
+
+        for col, ci in enumerate(cols_idx):
             ax = axes[row][col]
-            ax.plot(t_hist, y[lo:t0 + 1, col], color="k", lw=1.2, label="history")
-            ax.plot(t_fut, y[t0 + 1:t0 + 1 + H, col], color="k", lw=1.2, ls="-",
+            ax.plot(t_hist, y[lo:t0 + 1, ci], color="k", lw=1.2, label="history")
+            ax.plot(t_fut, y[t0 + 1:t0 + 1 + H, ci], color="k", lw=1.2, ls="-",
                     alpha=0.35, label="truth (future)")
             ax.axvline(t0 / fps, color="0.7", lw=0.8)
 
             for m in models:
                 c, ls = STYLE.get(m, ("tab:orange", "-"))
-                ax.plot(t_fut, z[f"mu_{m}"][j, :, col], color=c, ls=ls, lw=1.3, label=m)
+                ax.plot(t_fut, z[f"mu_{m}"][j, :, ci], color=c, ls=ls, lw=1.3, label=m)
                 if f"sigma_{m}" in z.files:
-                    s = z[f"sigma_{m}"][j, :, col]
-                    ax.fill_between(t_fut, z[f"mu_{m}"][j, :, col] - 2 * s,
-                                    z[f"mu_{m}"][j, :, col] + 2 * s,
-                                    color=c, alpha=0.15, lw=0,
-                                    label=f"{m} ±2σ")
+                    sg = z[f"sigma_{m}"][j, :, ci]
+                    ax.fill_between(t_fut, z[f"mu_{m}"][j, :, ci] - 2 * sg,
+                                    z[f"mu_{m}"][j, :, ci] + 2 * sg,
+                                    color=c, alpha=0.15, lw=0, label=f"{m} ±2σ")
+            # A second arm on the same clip and the same origin: the only honest way to see
+            # what an input change did, since a metric table cannot show where it changed.
+            if other is not None and "mu_prob_gru" in other.files \
+                    and other["mu_prob_gru"].shape[0] > j:
+                ax.plot(t_fut, other["mu_prob_gru"][j, :, ci], color="tab:brown", ls=(0, (3, 1, 1, 1)),
+                        lw=1.3, label=f"prob_gru ({a.compare_label})")
             if row == 0:
-                ax.set_title(ch, fontsize=10)
+                ax.set_title(all_chans[ci], fontsize=10)
             if col == 0:
                 ax.set_ylabel(f"[{idx}] {z['action']}\n{z['object_name']}", fontsize=8)
             if row == len(files) - 1:
@@ -113,12 +142,13 @@ def main():
     h, l = axes[0][0].get_legend_handles_labels()
     fig.legend(h, l, loc="upper center", ncol=min(len(l), 7), fontsize=8,
                frameon=False, bbox_to_anchor=(0.5, 1.0))
-    fig.suptitle("OpenTouch 1 s forecasts — grey line = forecast origin; "
-                 "band = probGRU ±2σ", fontsize=10, y=0.955)
+    fig.suptitle(f"OpenTouch 1 s forecasts — {', '.join(chans)} — grey line = forecast "
+                 f"origin; band = probGRU ±2σ", fontsize=10, y=0.955)
     fig.tight_layout(rect=(0, 0, 1, 0.93))
-    os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
-    fig.savefig(a.out, dpi=140)
-    print(f"wrote {a.out}  ({len(files)} clips, origin frac {a.origin})")
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    fig.savefig(out, dpi=140)
+    plt.close(fig)
+    print(f"wrote {out}  ({len(files)} clips, origin frac {a.origin})")
 
 
 if __name__ == "__main__":

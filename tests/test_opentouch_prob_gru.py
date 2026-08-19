@@ -184,3 +184,20 @@ def test_val_mse_is_tracked_beside_val_nll(cfg):
     assert "best_val_mse_epoch" in h and "best_val_nll_epoch" in h
     # the MSE is of the MEAN only: it must not depend on the variance head
     assert h["best_val_mse"] <= max(h["val_mse"]) + 1e-12
+
+
+def test_select_history_can_return_its_models(cfg):
+    """The sweep trains one model per length and used to discard all of them, so the
+    rows-are-history figure could not be drawn without paying for training twice."""
+    ids = list(range(12))
+    hp = {"epochs": 1, "hidden": 8}
+    best, scores = P.select_history(cfg, ids[:8], ids[8:10], (0.5, 1.0), hp)
+    assert set(scores) == {int(round(0.5 * cfg.fps)), int(round(1.0 * cfg.fps))}
+
+    best2, scores2, kept = P.select_history(cfg, ids[:8], ids[8:10], (0.5, 1.0), hp, keep=True)
+    assert best2 == best and scores2 == scores          # keeping changes nothing it returns
+    assert set(kept) == set(scores)
+    for t_in, out in kept.items():
+        m, norm, fnorm, vocab, by_idx, hist = out
+        p = P.predict(m, cfg, norm, fnorm, vocab, by_idx, [10], t_in)
+        assert np.isfinite(p[10]).all()

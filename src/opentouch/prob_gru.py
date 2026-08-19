@@ -327,15 +327,25 @@ def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
 
 def select_history(cfg: Config, train_ids: list[int], val_ids: list[int],
                    histories_s=(1.0, 2.0, 3.0), hp: dict | None = None,
-                   device: str | None = None):
-    """Input history chosen on VAL only, by NLL. -> (best_t_in, {t_in: best_val_nll})."""
-    scores = {}
+                   device: str | None = None, keep: bool = False):
+    """Input history chosen on VAL only, by NLL. -> (best_t_in, {t_in: best_val_nll}[, kept]).
+
+    WHY `keep` EXISTS. The sweep trains one model per history length and, until now, threw
+    every one of them away, returning a single scalar each; the chosen length was then
+    trained a second time from scratch. That made a figure like ActionSense's
+    plot_forecast_overlay -- whose rows ARE the history lengths -- impossible to draw
+    without paying for the training twice. With keep=True the trained models come back, so
+    their forecasts cost one prediction pass instead of one training run."""
+    scores, kept = {}, {}
     for s in histories_s:
         t_in = max(1, int(round(s * cfg.fps)))
         print(f"  sweep: history {s} s -> t_in={t_in} frames", flush=True)
-        *_, hist = train(cfg, train_ids, val_ids, t_in, hp, device=device)
-        scores[t_in] = hist["best_val_nll"]
-    return min(scores, key=scores.get), scores
+        out = train(cfg, train_ids, val_ids, t_in, hp, device=device)
+        scores[t_in] = out[-1]["best_val_nll"]
+        if keep:
+            kept[t_in] = out
+    best = min(scores, key=scores.get)
+    return (best, scores, kept) if keep else (best, scores)
 
 
 # -------------------------------------------------------------------------- prediction --

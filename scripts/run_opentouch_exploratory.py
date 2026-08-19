@@ -246,7 +246,7 @@ def run_split(cfg, splits, args, tag):
     for m in EV.MODELS:
         rows += emit_rows(cfg, m, results[m], results, tag)
 
-    ext, sig = {}, {}
+    ext, sig, kept = {}, {}, {}
     want = [] if (args.skip_gru or args.model == "none") else (
         ["prob_gru", "gru_aggregate"] if args.model == "both" else [args.model])
     for which in want:
@@ -277,8 +277,9 @@ def run_split(cfg, splits, args, tag):
             if args.epochs:
                 hp["epochs"] = args.epochs
             print(f"prob_gru: history sweep {hs} s on VAL by NLL (epochs={hp['epochs']}) ...")
-            t_in, scores = P.select_history(cfg, splits["train"], splits["val"], hs, hp,
-                                            device=args.device)
+            t_in, scores, kept = P.select_history(cfg, splits["train"], splits["val"], hs,
+                                                  hp, device=args.device,
+                                                  keep=bool(args.save_preds))
             print(f"  t_in={t_in} ({t_in / cfg.fps:.1f} s); val NLL {scores}")
             model, _, fnorm, vocab, by_idx, hist = P.train(
                 cfg, splits["train"], splits["val"], t_in, hp, norm=norm, device=args.device)
@@ -308,10 +309,39 @@ def run_split(cfg, splits, args, tag):
             sig[which] = {i: P.predict_with_sigma(model, cfg, norm, fnorm, vocab,
                                                   by_idx, i, t_in)[1]
                           for i in splits["test"]}
+            # Every swept history, not only the one VAL chose: these models are already
+            # trained, so their forecasts cost a prediction pass and make the
+            # rows-are-history figure drawable without training anything twice.
+            for th, (mh, nh, fh, vh, bh, _) in (kept or {}).items():
+                save_history_preds(cfg, splits, nh, P.predict(mh, cfg, nh, fh, vh, bh,
+                                                              splits["test"], th),
+                                   os.path.join(args.save_preds, f"hist_{th}"), th)
 
     if args.save_preds:
         save_predictions(cfg, splits, norm, ext, sig, args.save_preds, tag)
     return rows, results
+
+
+def save_history_preds(cfg, splits, norm, preds, out_dir, t_in):
+    """One directory per swept history length, holding just the signal and that model's mean.
+
+    Deliberately thinner than save_predictions: the baselines do not depend on the GRU's
+    history length, so recomputing them per length would be waste, and the figure these feed
+    draws one model per subplot anyway."""
+    from src.opentouch.dataset import load_group
+    os.makedirs(out_dir, exist_ok=True)
+    test = load_group(cfg, splits["test"])
+    rows = {r["idx"]: r for r in eligible_clips(cfg, actions=())}
+    from src.opentouch.baselines import origins
+    for i, Y in test.items():
+        np.savez_compressed(
+            os.path.join(out_dir, f"clip_{i}.npz"),
+            y=np.asarray(Y, dtype=np.float64),
+            origins=np.asarray(origins(len(Y), cfg)), fps=cfg.fps, t_in=t_in,
+            action=rows.get(i, {}).get("action", ""),
+            object_name=rows.get(i, {}).get("object_name", ""),
+            channels=np.array(cfg.channels), mu_prob_gru=preds[i])
+    print(f"  saved history t_in={t_in} forecasts -> {out_dir}")
 
 
 def save_predictions(cfg, splits, norm, ext, sig, out_dir, tag):

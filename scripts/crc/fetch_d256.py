@@ -37,10 +37,15 @@ Payloads (verified by pulling real members, 2026-08-16):
   signals/ego_4d_{verb,noun}.npy -> 148 verbs / 112 nouns (Ego4D vocabulary).
 
 Usage (on CRC; stdlib only, no conda env needed):
-    python3 scripts/crc/fetch_d256.py --dest /scratch365/$USER/forcevision            # signals
+    python3 scripts/crc/fetch_d256.py --dest ~/forcevision                            # signals
     python3 scripts/crc/fetch_d256.py --dest ... --groups signals,videos --lowres     # +32px RGB
     python3 scripts/crc/fetch_d256.py --dest ... --groups all                         # 185 GiB
     python3 scripts/crc/fetch_d256.py --dest ... --plan                               # dry run
+
+Storage on CRC: `/scratch365` is gone (2026-08-19). Home is 100 GB, and the signals-only
+12.34 GiB fits there; the 250.3 GiB full set does not, and needs a /temp180, /bluefs or
+/goldfs allocation requested from crcsupport@nd.edu -- those are not directories you can
+`mkdir` yourself.
 
 Interrupt-safe and idempotent: members are verified by CRC-32 from the central directory and
 already-correct files are skipped, so re-running resumes. Never writes outside --dest.
@@ -312,7 +317,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dest", required=True,
-                    help="output root; put it on /scratch365, NOT home (quota)")
+                    help="output root. Signals-only (12.34 GiB) fits the 100 GB CRC home "
+                         "quota; anything with video needs a /temp180 or /bluefs allocation")
     ap.add_argument("--groups", default="signals",
                     help="comma list of signals,signals1,signals2,videos,videos1,videos2 "
                          "| 'all' | 'signals' expands to all three signal groups "
@@ -344,16 +350,19 @@ def main():
     try:
         os.makedirs(dest, exist_ok=True)
     except OSError as exc:   # PermissionError, or EROFS on a read-only mount
-        # On CRC a per-user /scratch365 dir is provisioned, not self-created: if it is absent
-        # you cannot mkdir it, so say where to look rather than dumping a bare Errno 13.
+        # CRC's large-storage tiers (/temp180, /bluefs, /goldfs) are provisioned per user, not
+        # self-created, so an absent one cannot be mkdir'd. Say where to look rather than
+        # dumping a bare Errno 13. (/scratch365, which older docs point at, no longer exists.)
         blocker = dest
         while not os.path.exists(blocker):
             blocker = os.path.dirname(blocker)
         sys.exit(
             f"cannot create {dest}: {exc.strerror} under {blocker}\n"
-            f"  Find a writable target:  df -h /scratch365 ; ls -ld /scratch365/$USER ; quota -s\n"
-            f"  If /scratch365/$USER does not exist, request it from crcsupport@nd.edu.\n"
-            f"  Signals-only needs ~13 GiB, so $HOME or /tmp on a node can stand in meanwhile.")
+            f"  On CRC, check what you actually have:\n"
+            f"    quota ; for t in /temp180 /bluefs /goldfs; do ls -ld $t/$USER; done\n"
+            f"  (CRC's `quota` is a local wrapper and rejects `-s`. /scratch365 no longer exists.)\n"
+            f"  Those tiers are allocations -- request one from crcsupport@nd.edu if absent.\n"
+            f"  Signals-only needs ~13 GiB, which fits the 100 GB home quota: --dest ~/forcevision")
     drive = Drive()
     entries = load_manifest(drive, os.path.join(dest, "manifest.json"))
     members = select(entries, groups, args.lowres,

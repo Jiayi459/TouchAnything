@@ -39,14 +39,24 @@ rsync -avz --exclude '.git' --exclude '.venv' --exclude 'datasets' \
       ./ netid@crcfe01.crc.nd.edu:~/TouchAnything/
 ```
 **Data** — the tactile subset is gitignored, so transfer it separately (small, no MP4s).
-Put large data on scratch and symlink, to avoid home-quota limits:
+
+> ⚠️ **`/scratch365` no longer exists on CRC** (verified 2026-08-19: `df` on it falls back to
+> `/`, and `quota`'s own usage text no longer lists it). The tiers now are `/users/$USER`
+> (home, **100 GB**), `/groups`, `/temp180`, `/bluefs`, `/goldfs`, and AFS. As of 2026-08-19
+> netid `jhao3` has **no per-user directory on `/temp180`, `/bluefs`, or `/goldfs`** — those
+> are allocations you request from crcsupport@nd.edu, not directories you can `mkdir`. Until
+> one exists, everything must live under `$HOME` and fit its 100 GB quota, so check
+> `quota` (no `-s` — it's a CRC wrapper, not the standard tool) before staging anything big.
+
 ```bash
-# on CRC:
-mkdir -p /scratch365/$USER/egotouch
-ln -s /scratch365/$USER/egotouch ~/TouchAnything/datasets   # datasets -> scratch
-# on your LOCAL machine:
+# on CRC — with an allocation (preferred for anything large):
+mkdir -p /temp180/$USER/egotouch
+ln -sfn /temp180/$USER/egotouch ~/TouchAnything/datasets    # datasets -> allocation
+# without one, keep it in home and watch the quota:
+mkdir -p ~/data/egotouch && ln -sfn ~/data/egotouch ~/TouchAnything/datasets
+# on your LOCAL machine (point the target at whichever you chose):
 rsync -avz datasets/grasp_hold_lift_tactile/ \
-      netid@crcfe01.crc.nd.edu:/scratch365/NETID/egotouch/grasp_hold_lift_tactile/
+      netid@crcfe01.crc.nd.edu:~/data/egotouch/grasp_hold_lift_tactile/
 # (for pretraining, also rsync the full EgoTouch npz tree)
 ```
 
@@ -109,11 +119,12 @@ rsync -avz --exclude '.git' --exclude '.venv' --exclude 'datasets' --exclude 'ru
 
 # --- (B) stage ONLY the pressure grids of full EgoTouch to scratch (forecaster reads just
 #         pressure_grids.npz; dir names carry the task label for --category) ---
-# on CRC:
-mkdir -p /scratch365/$USER/egotouch && ln -sfn /scratch365/$USER/egotouch ~/TouchAnything/datasets
+# on CRC (see the storage note in step 1 -- /scratch365 is gone; use an allocation if you
+# have one, else home):
+mkdir -p ~/data/egotouch && ln -sfn ~/data/egotouch ~/TouchAnything/datasets
 # from LOCAL (only *.npz, preserving scene/task/traj structure):
 rsync -avz --prune-empty-dirs --include='*/' --include='pressure_grids.npz' --exclude='*' \
-      datasets/EgoTouch/ NETID@crcfe01.crc.nd.edu:/scratch365/NETID/egotouch/EgoTouch/
+      datasets/EgoTouch/ NETID@crcfe01.crc.nd.edu:~/data/egotouch/EgoTouch/
 
 # --- (C) env + smoke test (once) --- (see step 2-3 above for details)
 cd ~/TouchAnything && bash scripts/crc/setup_crc_env.sh

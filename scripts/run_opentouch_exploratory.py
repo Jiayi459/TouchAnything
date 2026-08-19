@@ -111,7 +111,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="configs/opentouch/eval_harness.yaml")
     ap.add_argument("--gru-config", default="configs/opentouch/gru_aggregate.yaml")
-    ap.add_argument("--split-mode", default="location", choices=["location", "adhoc"],
+    ap.add_argument("--split-mode", default="location",
+                    choices=["location", "adhoc", "random"],
                     help="location = src/opentouch/splits.py, the real protocol; adhoc = "
                          "the field-level fallback this script used before splits.py existed")
     ap.add_argument("--split-field", default="scene",
@@ -155,7 +156,26 @@ def main():
     clips = eligible_clips(cfg)
     if args.max_clips and len(clips) > args.max_clips:
         clips = random.Random(args.seed).sample(clips, args.max_clips)
-    if args.split_mode == "location":
+    if args.split_mode == "random":
+        # WITHIN-location clip-level split, for one purpose only: telling memorisation
+        # apart from location shift. Both make VAL degrade under the location split, and
+        # they need different fixes. If VAL still degrades from epoch 2 when TRAIN and VAL
+        # come from the SAME places, the model is memorising; if it flattens, what it
+        # learned was location-specific and no regulariser will supply the missing
+        # diversity. NEVER a protocol split -- clips from one scene are near-duplicates.
+        ids = sorted(r["idx"] for r in clips)
+        rng = random.Random(args.seed)
+        rng.shuffle(ids)
+        n = len(ids)
+        splits = {"train": sorted(ids[: int(0.6 * n)]),
+                  "val": sorted(ids[int(0.6 * n): int(0.8 * n)]),
+                  "test": sorted(ids[int(0.8 * n):])}
+        tag = f"random-clip-seed{args.seed}"
+        print(f"DIAGNOSTIC SPLIT (leaky by construction): {tag} | "
+              f"train {len(splits['train'])} val {len(splits['val'])} "
+              f"test {len(splits['test'])}")
+        print("  Use it to read the training curve, never to report a score.")
+    elif args.split_mode == "location":
         from src.opentouch import splits as SP
         splits = SP.build(cfg, seed=args.seed)
         tag = f"location-seed{args.seed}"

@@ -57,6 +57,7 @@ python -m pytest tests/test_opentouch_prob_gru.py tests/test_opentouch_gru_aggre
 python -u scripts/run_opentouch_exploratory.py \
     --model "${MODEL:-prob_gru}" \
     --split-mode "${SPLIT_MODE:-location}" \
+    ${CONFIG:+--config "$CONFIG"} \
     --seed "${SEED:-0}" \
     ${FOLDS:+--folds "$FOLDS"} \
     ${SAVE_PREDS:+--save-preds "$SAVE_PREDS"} \

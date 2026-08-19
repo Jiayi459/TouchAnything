@@ -51,6 +51,12 @@ import os
 
 import numpy as np
 
+# The estimator now lives in src/opentouch/baseline.py so the script that WRITES the
+# corrected cache cannot drift from the one whose behaviour was measured here.
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.opentouch.baseline import estimate, quantum        # noqa: E402,F401
+
 MAD_TO_SIGMA = 1.4826
 
 
@@ -75,35 +81,6 @@ def shard_frames(cache, rows, max_frames, stride):
     return np.concatenate(out, 0)[:max_frames], used
 
 
-def quantum(frames):
-    """The reading's quantisation step: the smallest positive gap between distinct values.
-
-    The corpus stores integer-valued counts (every per-shard baseline came out on a whole
-    number), so a scale estimator can and does collapse to zero -- see estimate()."""
-    v = np.unique(frames)
-    if v.size < 2:
-        return 1.0
-    d = np.diff(v)
-    d = d[d > 0]
-    return float(np.min(d)) if d.size else 1.0
-
-
-def estimate(frames, q=None):
-    """-> (baseline (256,), sigma (256,)). Median, and a one-sided robust scale.
-
-    WHY SIGMA HAS A FLOOR. The first version used 1.4826 * MAD over the frames at or below
-    the median and reported a median sigma of exactly 0.00 on every one of the 26 shards
-    (2026-08-16). That is not a quiet sensor: the readings are quantised, most taxels sit on
-    one integer while not being touched, so more than half the below-median residuals are
-    exactly zero and the MAD with them. A zero sigma makes the soft threshold inert -- k
-    stops doing anything, which is what the first k sweep showed. Sub-quantum noise cannot
-    be resolved, so the floor is half a quantisation step: the smallest scale at which the
-    reading could vary at all."""
-    base = np.median(frames, axis=0)
-    below = np.where(frames <= base, frames, np.nan)          # keep the lower half only
-    mad = MAD_TO_SIGMA * np.nan_to_num(np.nanmedian(np.abs(below - base), axis=0), nan=0.0)
-    q = quantum(frames) if q is None else q
-    return base, np.maximum(mad, 0.5 * q)
 
 
 def moments(p):

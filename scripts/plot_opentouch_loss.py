@@ -44,50 +44,56 @@ def load_ckpts(d):
 
 
 def coverage(preds_dir, k_sigma=2.0):
-    """Coverage and scale, POOLED and PER CHANNEL.
+    """Coverage and scale for EVERY probabilistic arm, per channel.
 
-    Per channel is not a refinement, it is the point. F sits near 750,000 while CoP lives in
-    [-1,1], so a pooled median sigma is whatever the two CoP channels say and tells you
-    nothing about F -- and a pooled coverage can read 95% while one channel hedges and
-    another is overconfident, cancelling. The first version reported only the pooled number
-    and would have hidden exactly that.
+    Per model, because OQ-G was overturned globally (2026-08-19) and all of them now emit a
+    variance; a head that is trained and never checked against the errors it claims to
+    describe is unfalsifiable decoration.
+
+    Per channel, because that is the point rather than a refinement: F sits near 750,000
+    while CoP lives in [-1,1], so a pooled median sigma is whatever the CoP channels say and
+    carries nothing about F, and a pooled coverage can read 95% while one channel hedges and
+    another is overconfident, cancelling.
 
     Both statistics are kept: coverage alone cannot separate a well-sized interval from a
     wide one that happens to sit in the right place, and the sigma-to-error ratio alone
     ignores where the mean is. For Gaussian errors the ratio is 1/0.6745 = 1.48; materially
-    below that means the tails are heavier than the interval admits."""
-    inside = tot = 0
-    sig, err = [], []
-    per = collections.defaultdict(lambda: [0, 0, [], []])   # channel -> in, tot, sig, err
+    below it means the tails are heavier than the interval admits.
+
+    -> {model: {channel: (coverage, median sigma, median |error|)}}
+    """
+    acc = collections.defaultdict(lambda: collections.defaultdict(
+        lambda: [0, 0, [], []]))                       # model -> channel -> in,tot,sig,err
     chans = None
     for p in sorted(glob.glob(os.path.join(preds_dir, "clip_*.npz"))):
         z = np.load(p, allow_pickle=True)
-        if "sigma_prob_gru" not in z.files or "mu_prob_gru" not in z.files:
+        ors = z["origins"]
+        if len(ors) == 0:        # too short to yield an origin; a file was still written
             continue
-        y, ors = z["y"], z["origins"]
-        mu, sd = z["mu_prob_gru"], z["sigma_prob_gru"]
-        if len(ors) == 0 or mu.shape[0] == 0:
-            continue          # a clip too short to yield any forecast origin still got a
-        H = mu.shape[1]       # file written for it; there is simply nothing to score
-
-        truth = np.stack([y[t + 1:t + 1 + H] for t in ors])
-        d = np.abs(truth - mu)
-        inside += int((d <= k_sigma * sd).sum()); tot += d.size
-        sig.append(sd.ravel()); err.append(d.ravel())
-        if chans is None:
-            chans = [str(c) for c in z["channels"]] if "channels" in z.files else \
-                    [f"c{j}" for j in range(d.shape[-1])]
-        for j, c in enumerate(chans):
-            e = per[c]
-            e[0] += int((d[..., j] <= k_sigma * sd[..., j]).sum()); e[1] += d[..., j].size
-            e[2].append(sd[..., j].ravel()); e[3].append(d[..., j].ravel())
-    if tot == 0:
-        return None
-    by_ch = {c: (v[0] / max(v[1], 1), float(np.median(np.concatenate(v[2]))),
-                 float(np.median(np.concatenate(v[3]))))
-             for c, v in per.items()}
-    return (inside / tot, float(np.median(np.concatenate(sig))),
-            float(np.median(np.concatenate(err))), by_ch)
+        if chans is None and "channels" in z.files:
+            chans = [str(c) for c in z["channels"]]
+        for key in z.files:
+            if not key.startswith("sigma_") or f"mu_{key[6:]}" not in z.files:
+                continue
+            name = key[6:]
+            mu, sd = z[f"mu_{name}"], z[key]
+            if mu.shape[0] == 0:
+                continue
+            H = mu.shape[1]
+            truth = np.stack([z["y"][t + 1:t + 1 + H] for t in ors])
+            d = np.abs(truth - mu)
+            if chans is None:
+                chans = [f"c{j}" for j in range(d.shape[-1])]
+            for j, c in enumerate(chans):
+                e = acc[name][c]
+                e[0] += int((d[..., j] <= k_sigma * sd[..., j]).sum())
+                e[1] += d[..., j].size
+                e[2].append(sd[..., j].ravel()); e[3].append(d[..., j].ravel())
+    return {m: {c: (v[0] / max(v[1], 1),
+                    float(np.median(np.concatenate(v[2]))),
+                    float(np.median(np.concatenate(v[3]))))
+                for c, v in chs.items()}
+            for m, chs in acc.items()}
 
 
 def main():
@@ -154,23 +160,18 @@ def main():
 
     cov = coverage(a.preds)
     if cov:
-        frac, msig, merr, by_ch = cov
-        fig.suptitle(f"±2σ coverage {frac:.1%} (nominal 95.4%) | median σ {msig:.4g} vs "
-                     f"median |error| {merr:.4g}  (ratio {msig / max(merr, 1e-9):.2f})",
-                     fontsize=10)
-        print(f"±2 sigma coverage: {frac:.2%} (nominal 95.4%)")
-        print(f"median sigma {msig:.5g} | median |error| {merr:.5g} "
-              f"| ratio {msig / max(merr, 1e-9):.2f}   (pooled: dominated by whichever "
-              f"channel has the smaller scale -- read the per-channel table below)")
-        print(f"\n{'channel':10s} {'±2σ cov':>9s} {'median σ':>12s} "
+        print(f"\n{'model':14s} {'channel':10s} {'±2σ cov':>9s} {'median σ':>12s} "
               f"{'median |err|':>13s} {'σ/|err|':>8s}")
-        for c, (f_, s_, e_) in by_ch.items():
-            print(f"{c:10s} {f_:9.2%} {s_:12.5g} {e_:13.5g} {s_ / max(e_, 1e-12):8.2f}")
+        for m in sorted(cov):
+            for c, (f_, s_, e_) in cov[m].items():
+                print(f"{m:14s} {c:10s} {f_:9.2%} {s_:12.5g} {e_:13.5g} "
+                      f"{s_ / max(e_, 1e-12):8.2f}")
         print("Gaussian errors give σ/|err| = 1.48 and 95.4% coverage. Above -> the head "
               "hedges with intervals wider than its mistakes; below -> it is overconfident. "
-              "The harness scores point error only, so neither shows up anywhere else, and "
-              "the pooled row cannot separate the channels: F and CoP differ by orders of "
-              "magnitude, so a pooled median is whatever CoP says.")
+              "The harness scores point error only, so neither shows up anywhere else.")
+        first = sorted(cov)[0]
+        line = "  ".join(f"{c} {v[0]:.1%}" for c, v in cov[first].items())
+        fig.suptitle(f"±2σ coverage (nominal 95.4%) — {first}: {line}", fontsize=10)
     fig.tight_layout(rect=(0, 0, 1, 0.93 if cov else 1.0))
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
     fig.savefig(a.out, dpi=140)

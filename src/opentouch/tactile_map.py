@@ -295,6 +295,35 @@ def train(cfg: Config, encoder: str, train_ids: list[int], val_ids: list[int], t
 
 
 @torch.no_grad()
+def predict_with_sigma(model, cfg: Config, encoder: str, norm: Norm, mnorm,
+                       test_ids: list[int], t_in: int, base_ids: list[int]):
+    """({idx: mu}, {idx: sigma}) in RAW units.
+
+    The head predicts a residual in z-space, so the anchor is a constant shift and cancels:
+    sigma_raw = exp(lv/2) * norm.std, exactly as in prob_gru."""
+    model.eval()
+    inputs, _ = build_inputs(cfg, encoder, test_ids, base_ids, norm,
+                             mnorm.alpha if mnorm else DEFAULT_HP["alpha"], mnorm)
+    dev = next(model.parameters()).device
+    mus, sds = {}, {}
+    C = len(cfg.channels)
+    for i in test_ids:
+        Y = np.asarray(load_target(cfg, i), dtype=np.float64)
+        z = norm.z(Y)
+        ors = origins(len(z), cfg)
+        if i not in inputs or len(ors) == 0:
+            mus[i] = np.zeros((len(ors), cfg.horizon, C))
+            sds[i] = np.zeros((len(ors), cfg.horizon, C))
+            continue
+        X, _ = windows(cfg, [i], t_in, {i: inputs[i]}, norm)
+        mu, lv = model(X.to(dev))
+        resid = mu.cpu().numpy().astype(np.float64)
+        mus[i] = norm.unz(z[ors][:, None, :] + resid)
+        sds[i] = np.exp(0.5 * lv.cpu().numpy().astype(np.float64)) * np.asarray(norm.std)
+    return mus, sds
+
+
+@torch.no_grad()
 def predict(model, cfg: Config, encoder: str, norm: Norm, mnorm, test_ids: list[int],
             t_in: int, base_ids: list[int]) -> dict[int, np.ndarray]:
     """{clip idx: (n_origins,H,C) RAW-unit forecasts}, for evaluate.score_external.

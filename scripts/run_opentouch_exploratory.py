@@ -277,8 +277,13 @@ def run_split(cfg, splits, args, tag):
             print(f"  t_in={t_in} ({t_in / cfg.fps:.1f} s); val NLL {scores}")
             model, _, mnorm, hist = TM.train(cfg, enc, splits["train"], splits["val"],
                                              t_in, hp, norm=norm, device=args.device)
-            preds = TM.predict(model, cfg, enc, norm, mnorm, splits["test"], t_in,
-                               splits["train"] + splits["val"])
+            # Every arm in this family is probabilistic (OQ-G overturned globally,
+            # 2026-08-19), so every arm's sigma is saved -- a variance that is trained and
+            # never recorded cannot be checked against the errors it claims to describe.
+            preds, sd = TM.predict_with_sigma(model, cfg, enc, norm, mnorm, splits["test"],
+                                              t_in, splits["train"] + splits["val"])
+            if args.save_preds:
+                sig[which] = sd
             print(f"  best val NLL {hist['best_val_nll']:.6f}")
         elif which == "gru_aggregate":
             from src.opentouch import gru_aggregate as G

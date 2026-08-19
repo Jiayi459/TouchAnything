@@ -1,5 +1,16 @@
 """GRU-aggregate for OpenTouch: DETERMINISTIC point forecaster on the aggregate F/CoP signal.
 
+SUPERSEDED 2026-08-19: OQ-G, which made this arm deterministic and deleted its Gaussian
+head, was overturned globally at the user's direction -- every arm now emits a variance.
+The probabilistic version of exactly this model is `aggregate` in src/opentouch/tactile_map.py
+(same AggEncoder, same GRU, with the mu/logvar head restored), and that is what runs.
+
+This file is NOT edited into the new behaviour: its git history is the pre-registration
+record for the deterministic arm, and rewriting it would erase what was committed before
+any number existed. It stays as the artifact, importable and tested; new work uses the
+tactile_map family so that flatten, cnn and aggregate differ only in the encoder.
+
+
 FORKED from the `aggregate` branch of src/actionsense/tactile_map/ (Q6, decided 2026-08-12:
 "单独 fork deterministic GRU-aggregate;CNN-map / flatten-map 继续暂缓").
 

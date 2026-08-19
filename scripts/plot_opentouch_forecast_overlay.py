@@ -115,6 +115,8 @@ def main():
                 idx, mu = rolling(z, m, H)
                 ax.plot(idx / fps, mu[:, k], "-", color=STYLE.get(m, "C1"), lw=1.3,
                         label=f"{m} 1 s forecast")
+                ax.text(0.015, 0.93, m, transform=ax.transAxes, fontsize=8,
+                        color=STYLE.get(m, "C1"), fontweight="bold", va="top")
                 if a.compare:
                     p2 = os.path.join(a.compare, os.path.basename(path))
                     if os.path.exists(p2):
@@ -130,11 +132,14 @@ def main():
                     ax.set_ylabel(f"{m}\n{ylabel}", fontsize=8)
                 if ri == len(models) - 1:
                     ax.set_xlabel("time (s)", fontsize=9)
-                if ri == 0 and ci == 0:
-                    ax.legend(fontsize=7, loc="upper right")
+                # A legend PER ROW, not one for the figure. The figure-level version took
+                # its handles from axes[0][0], so it named only the alphabetically first
+                # model and the whole plot read as if it showed that one model alone.
+                if ci == 0:
+                    ax.legend(fontsize=6, loc="upper right")
                 ax.grid(alpha=.25)
                 ax.tick_params(labelsize=7)
-        fig.suptitle(f"OpenTouch {tag}: real vs rolling 1 s forecast (one model per row)",
+        fig.suptitle(f"OpenTouch {tag}: real vs rolling 1 s forecast, one model per row",
                      fontsize=11)
         fig.tight_layout(rect=(0, 0, 1, 0.97))
         out = f"{a.out_prefix}_{tag}.png"

@@ -328,7 +328,13 @@ def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
 def select_history(cfg: Config, train_ids: list[int], val_ids: list[int],
                    histories_s=(1.0, 2.0, 3.0), hp: dict | None = None,
                    device: str | None = None, keep: bool = False):
-    """Input history chosen on VAL only, by NLL. -> (best_t_in, {t_in: best_val_nll}[, kept]).
+    """Input history chosen on VAL only, by NLL. -> (best_t_in, {t_in: best_val_nll}, kept).
+
+    THE ARITY IS FIXED. `kept` is {} unless keep=True, rather than the return being two
+    values or three depending on a flag -- that shape crashed the 2026-08-19 diagnostic run
+    after it had finished the whole sweep, because the caller unpacked three while a run
+    without --save-preds produced two. A return whose length depends on an argument is a
+    trap for exactly this.
 
     WHY `keep` EXISTS. The sweep trains one model per history length and, until now, threw
     every one of them away, returning a single scalar each; the chosen length was then
@@ -344,8 +350,7 @@ def select_history(cfg: Config, train_ids: list[int], val_ids: list[int],
         scores[t_in] = out[-1]["best_val_nll"]
         if keep:
             kept[t_in] = out
-    best = min(scores, key=scores.get)
-    return (best, scores, kept) if keep else (best, scores)
+    return min(scores, key=scores.get), scores, kept
 
 
 # -------------------------------------------------------------------------- prediction --

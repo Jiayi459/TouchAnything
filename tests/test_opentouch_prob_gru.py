@@ -191,8 +191,11 @@ def test_select_history_can_return_its_models(cfg):
     rows-are-history figure could not be drawn without paying for training twice."""
     ids = list(range(12))
     hp = {"epochs": 1, "hidden": 8}
-    best, scores = P.select_history(cfg, ids[:8], ids[8:10], (0.5, 1.0), hp)
+    best, scores, none_kept = P.select_history(cfg, ids[:8], ids[8:10], (0.5, 1.0), hp)
     assert set(scores) == {int(round(0.5 * cfg.fps)), int(round(1.0 * cfg.fps))}
+    # the arity does NOT depend on `keep`: a flag-dependent return length crashed a run
+    # after it had done all its training (2026-08-19)
+    assert none_kept == {}
 
     best2, scores2, kept = P.select_history(cfg, ids[:8], ids[8:10], (0.5, 1.0), hp, keep=True)
     assert best2 == best and scores2 == scores          # keeping changes nothing it returns

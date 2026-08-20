@@ -73,7 +73,20 @@ DEFAULT_HP = {"hidden": 48, "epochs": 80, "lr": 0.003, "batch": 64, "seed": 0,
               # -- and the first thing to try is the one with a mechanism behind it
               # (features="raw+df" removes the per-location DC level the model can memorise),
               # not a pile of regularisers applied at once.
-              "weight_decay": 0.0, "dropout": 0.0}
+              "weight_decay": 0.0, "dropout": 0.0,
+              # WHICH VAL CURVE PICKS THE WEIGHTS. The 2026-08-20 D1 curves showed the two
+              # disagreeing on real data, not just in principle: fold0's VAL MSE was still
+              # falling at epoch 8 while its VAL NLL had been climbing since epoch 1, and
+              # the min-NLL and min-MSE epochs landed in different places in every fold. So
+              # "nll" hands the harness -- which scores point error and nothing else --
+              # weights chosen by a criterion it does not measure.
+              #
+              # The default stays "nll" so every number already in the log remains
+              # reproducible; "mse" is the one to run when the report is the point. Both
+              # state dicts are kept either way (a 48-unit GRU is a few hundred KB, so
+              # keeping the loser costs nothing) and both epochs are recorded, which is what
+              # makes the disagreement visible instead of merely possible.
+              "select_on": "nll"}
 OTHER = 0          # reserved embedding id: rare-in-TRAIN or unseen-at-TEST actions
 
 
@@ -274,8 +287,14 @@ def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
                 dropout=float(hp["dropout"])).to(dev)
     opt = torch.optim.Adam(m.parameters(), lr=hp["lr"],
                            weight_decay=float(hp["weight_decay"]))
-    best, best_state, history = np.inf, None, {"train_nll": [], "val_nll": [],
-                                               "val_mse": []}
+    sel = str(hp.get("select_on", "nll")).lower()
+    if sel not in ("nll", "mse"):
+        raise ValueError(f"select_on must be 'nll' or 'mse', got {sel!r}")
+    # Both are tracked whichever one selects, so the checkpoint can always answer "and what
+    # would the other criterion have picked?" without a second training run.
+    best_nll, best_mse = np.inf, np.inf
+    state_nll = state_mse = None
+    history = {"train_nll": [], "val_nll": [], "val_mse": []}
     t0 = time.time()
     for ep in range(n_ep):
         m.train()
@@ -295,7 +314,7 @@ def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
             va, va_mse = (tr if want_tr else float("nan")), float("nan")
         history["train_nll"].append(tr); history["val_nll"].append(va)
         history["val_mse"].append(va_mse)
-        improved = va < best
+        improved = (va_mse < best_mse) if sel == "mse" else (va < best_nll)
         if verbose:
             el = time.time() - t0
             trs = f"{tr:.5f}" if np.isfinite(tr) else "  --   "
@@ -303,12 +322,24 @@ def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
                   f"mse {va_mse:.5f}"
                   f"{'  *best' if improved else ''} | {el:.0f}s elapsed, "
                   f"~{el / (ep + 1) * (n_ep - ep - 1):.0f}s left", flush=True)
-        if improved:
-            best, best_state = va, {k: v.detach().clone() for k, v in m.state_dict().items()}
-    if best_state is not None:
-        m.load_state_dict(best_state)
+        snap = None
+        if va < best_nll:
+            best_nll = va
+            snap = state_nll = {k: v.detach().clone() for k, v in m.state_dict().items()}
+        if np.isfinite(va_mse) and va_mse < best_mse:
+            best_mse = va_mse
+            state_mse = snap or {k: v.detach().clone() for k, v in m.state_dict().items()}
+    # Fall back rather than fail when MSE selection was asked for but VAL never produced a
+    # finite one (no VAL windows at all): the run still yields a model, and history records
+    # which criterion actually chose it.
+    chosen = state_mse if (sel == "mse" and state_mse is not None) else state_nll
+    if sel == "mse" and state_mse is None:
+        sel = "nll (mse requested, but VAL MSE was never finite)"
+    if chosen is not None:
+        m.load_state_dict(chosen)
     m.eval()
-    history["best_val_nll"] = float(best)
+    history["selected_on_metric"] = sel
+    history["best_val_nll"] = float(best_nll)
     vm = np.asarray(history["val_mse"], dtype=float)
     if np.isfinite(vm).any():
         history["best_val_mse"] = float(np.nanmin(vm))
@@ -328,7 +359,11 @@ def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
 def select_history(cfg: Config, train_ids: list[int], val_ids: list[int],
                    histories_s=(1.0, 2.0, 3.0), hp: dict | None = None,
                    device: str | None = None, keep: bool = False):
-    """Input history chosen on VAL only, by NLL. -> (best_t_in, {t_in: best_val_nll}, kept).
+    """Input history chosen on VAL only. -> (best_t_in, {t_in: score}, kept).
+
+    Scored by the SAME criterion that picks the weights (hp["select_on"]), because choosing
+    the input length by one curve and the weights by another would be two different
+    definitions of "best" inside one run.
 
     THE ARITY IS FIXED. `kept` is {} unless keep=True, rather than the return being two
     values or three depending on a flag -- that shape crashed the 2026-08-19 diagnostic run
@@ -347,7 +382,9 @@ def select_history(cfg: Config, train_ids: list[int], val_ids: list[int],
         t_in = max(1, int(round(s * cfg.fps)))
         print(f"  sweep: history {s} s -> t_in={t_in} frames", flush=True)
         out = train(cfg, train_ids, val_ids, t_in, hp, device=device)
-        scores[t_in] = out[-1]["best_val_nll"]
+        key = "best_val_mse" if str(hp.get("select_on", "nll")).lower() == "mse" \
+            else "best_val_nll"
+        scores[t_in] = out[-1].get(key, out[-1]["best_val_nll"])
         if keep:
             kept[t_in] = out
     return min(scores, key=scores.get), scores, kept

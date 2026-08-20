@@ -64,6 +64,7 @@ python -u scripts/run_opentouch_exploratory.py \
     ${SAVE_MODEL:+--save-model "$SAVE_MODEL"} \
     ${FEATURES:+--features "$FEATURES"} \
     ${WEIGHT_DECAY:+--weight-decay "$WEIGHT_DECAY"} \
+    ${SELECT_ON:+--select-on "$SELECT_ON"} \
     ${DROPOUT:+--dropout "$DROPOUT"} \
     ${EPOCHS:+--epochs "$EPOCHS"} \
     ${HISTORIES:+--histories "$HISTORIES"} \

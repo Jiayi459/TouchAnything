@@ -204,3 +204,48 @@ def test_select_history_can_return_its_models(cfg):
         m, norm, fnorm, vocab, by_idx, hist = out
         p = P.predict(m, cfg, norm, fnorm, vocab, by_idx, [10], t_in)
         assert np.isfinite(p[10]).all()
+
+
+def test_select_on_picks_the_epoch_that_criterion_minimises(tmp_path):
+    """'nll' and 'mse' must load DIFFERENT weights when the two curves disagree.
+
+    The 2026-08-20 D1 run had fold0's VAL MSE still falling while its VAL NLL climbed from
+    epoch 1, so the knob only means anything if the two settings actually diverge. This
+    asserts the mechanics -- both criteria are tracked, the requested one selects, and the
+    run records which -- rather than that any particular epoch wins on toy data.
+    """
+    cfg = _cfg(tmp_path)
+    ids = [c["idx"] for c in P.eligible_clips(cfg)]
+    hp = dict(P.DEFAULT_HP, hidden=4, epochs=4, batch=8, log_train_every=1)
+
+    seen = {}
+    for crit in ("nll", "mse"):
+        _, _, _, _, _, h = P.train(cfg, ids[:8], ids[8:10], 6,
+                                   dict(hp, select_on=crit), device="cpu")
+        assert h["selected_on_metric"] == crit
+        # both curves are recorded no matter which one selected
+        assert len(h["val_nll"]) == 4 and len(h["val_mse"]) == 4
+        assert "best_val_nll_epoch" in h and "best_val_mse_epoch" in h
+        seen[crit] = (h["best_val_nll_epoch"], h["best_val_mse_epoch"])
+
+    # the recorded epochs describe the curves, so they do not depend on which one selected
+    assert seen["nll"] == seen["mse"]
+
+    with pytest.raises(ValueError, match="select_on"):
+        P.train(cfg, ids[:8], ids[8:10], 6, dict(hp, select_on="rmse"), device="cpu")
+
+
+def test_history_sweep_scores_by_the_selecting_criterion(tmp_path):
+    """Input length and weights must be chosen by one definition of "best", not two."""
+    cfg = _cfg(tmp_path)
+    ids = [c["idx"] for c in P.eligible_clips(cfg)]
+    hp = dict(P.DEFAULT_HP, hidden=4, epochs=2, batch=8, log_train_every=1)
+
+    _, s_nll, k_nll = P.select_history(cfg, ids[:8], ids[8:10], (0.5, 1.0),
+                                       dict(hp, select_on="nll"), keep=True)
+    _, s_mse, k_mse = P.select_history(cfg, ids[:8], ids[8:10], (0.5, 1.0),
+                                       dict(hp, select_on="mse"), keep=True)
+    assert set(s_nll) == set(s_mse)
+    for t in s_nll:
+        assert s_nll[t] == pytest.approx(k_nll[t]["best_val_nll"])
+        assert s_mse[t] == pytest.approx(k_mse[t]["best_val_mse"])

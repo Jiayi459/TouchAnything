@@ -132,6 +132,10 @@ def main():
                     help="Adam weight decay for prob_gru (0 = ActionSense's setting)")
     ap.add_argument("--dropout", type=float, default=0.0,
                     help="dropout on the prob_gru heads (0 = the verbatim architecture)")
+    ap.add_argument("--select-on", default="nll", choices=["nll", "mse"],
+                    help="VAL curve that picks the probGRU weights and input history. The "
+                         "harness scores point error only, so 'mse' aligns selection with "
+                         "reporting; 'nll' is the default that reproduces earlier runs.")
     ap.add_argument("--features", default="raw", choices=["raw", "raw+df"],
                     help="prob_gru inputs: raw = ActionSense's five verbatim; raw+df adds "
                          "dF/dt, the one view of force that carries no DC (ablation)")
@@ -294,7 +298,8 @@ def run_split(cfg, splits, args, tag):
                                  norm=norm, device=args.device)
                 scores[ti] = h["best_val_nll"]
             t_in = min(scores, key=scores.get)
-            print(f"  t_in={t_in} ({t_in / cfg.fps:.1f} s); val NLL {scores}")
+            print(f"  t_in={t_in} ({t_in / cfg.fps:.1f} s); "
+                  f"val {args.select_on.upper()} {scores}")
             model, _, mnorm, hist = TM.train(cfg, enc, splits["train"], splits["val"],
                                              t_in, hp, norm=norm, device=args.device)
             # Every arm in this family is probabilistic (OQ-G overturned globally,
@@ -324,9 +329,11 @@ def run_split(cfg, splits, args, tag):
             hp["features"] = args.features
             hp["weight_decay"] = args.weight_decay
             hp["dropout"] = args.dropout
+            hp["select_on"] = args.select_on
             if args.epochs:
                 hp["epochs"] = args.epochs
-            print(f"prob_gru: history sweep {hs} s on VAL by NLL (epochs={hp['epochs']}) ...")
+            print(f"prob_gru: history sweep {hs} s on VAL by {args.select_on.upper()} "
+                  f"(epochs={hp['epochs']}) ...")
             t_in, scores, kept = P.select_history(cfg, splits["train"], splits["val"], hs,
                                                   hp, device=args.device,
                                                   keep=bool(args.save_preds))
@@ -337,7 +344,10 @@ def run_split(cfg, splits, args, tag):
             print(f"  best val NLL {hist['best_val_nll']:.6f} | "
                   f"action vocab {hist['n_actions']} (incl. 'other') | "
                   f"features {hist['features']} ({hist['n_features']} dims) | "
-                  f"wd {hist['weight_decay']:g} drop {hist['dropout']:g}")
+                  f"wd {hist['weight_decay']:g} drop {hist['dropout']:g} | "
+                  f"weights chosen on VAL {hist['selected_on_metric'].upper()} "
+                  f"(min NLL @ epoch {hist.get('best_val_nll_epoch', '?')}, "
+                  f"min MSE @ epoch {hist.get('best_val_mse_epoch', '?')})")
 
         R = EV.score_external(cfg, splits, which, preds, results, norm)
         rows += emit_rows(cfg, which, R, results, tag)

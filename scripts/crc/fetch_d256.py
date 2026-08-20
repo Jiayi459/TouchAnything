@@ -305,6 +305,33 @@ def fetch_span(drive, span, dest, done, done_fh, stats):
             stats["files"] += 1; stats["bytes"] += e["c"]
 
 
+def verify(members, dest):
+    """Re-hash every selected member on disk. Returns (ok, missing, bad)."""
+    ok, missing, bad = 0, [], []
+    total = len(members)
+    t0 = time.time()
+    for i, e in enumerate(members, 1):
+        path = os.path.join(dest, *e["n"].split("/"))
+        if not os.path.exists(path):
+            missing.append(e["n"]); continue
+        size = os.path.getsize(path)
+        if size != e["u"]:
+            bad.append((e["n"], f"size {size} != {e['u']}")); continue
+        crc = 0
+        with open(path, "rb") as fh:
+            while True:
+                blk = fh.read(1 << 20)
+                if not blk:
+                    break
+                crc = binascii.crc32(blk, crc)
+        if crc != e["crc"]:
+            bad.append((e["n"], f"crc {crc:08x} != {e['crc']:08x}")); continue
+        ok += 1
+        if i % 5000 == 0 or i == total:
+            print(f"    {i}/{total} checked ({time.time()-t0:.0f}s)", flush=True)
+    return ok, missing, bad
+
+
 def human(n):
     for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
         if abs(n) < 1024 or unit == "TiB":
@@ -329,6 +356,12 @@ def main():
     ap.add_argument("--include", default=None,
                     help="extra regex filter on the full member path, e.g. '/val/' or '/S0[12]/'")
     ap.add_argument("--plan", action="store_true", help="print what would be fetched, then exit")
+    ap.add_argument("--verify", action="store_true",
+                    help="re-read every selected file from disk and check its size and CRC-32 "
+                         "against the archive's central directory, then exit. Uses no network "
+                         "beyond the cached manifest. This is the only check that proves the "
+                         "bytes are intact -- a normal run's resume logic only asks whether a "
+                         "file exists, which a truncated or half-written file also satisfies")
     ap.add_argument("--file-id", default=FILE_ID, help="override the Drive file id")
     args = ap.parse_args()
     FILE_ID = args.file_id
@@ -386,6 +419,29 @@ def main():
     print(f"  selected {len(members)} members ({len(done)} already on disk)")
     print(f"  to fetch: {len(pending)} files, {human(todo_c)} transfer -> {human(todo_u)} on disk")
     print(f"  in {len(spans)} ranged request span(s)")
+    if args.verify:
+        print(f"  re-hashing {len(members)} files from disk (no network)...", flush=True)
+        ok, missing, bad = verify(members, dest)
+        print(f"\n  intact:  {ok}")
+        print(f"  missing: {len(missing)}")
+        print(f"  corrupt: {len(bad)}")
+        for n in missing[:10]:
+            print(f"    MISSING {n}")
+        for n, why in bad[:10]:
+            print(f"    CORRUPT {n}: {why}")
+        if missing or bad:
+            # Drop them from the done log so a plain re-run refetches exactly these.
+            drop = set(missing) | {n for n, _ in bad}
+            kept = [n for n in sorted(done) if n not in drop]
+            with open(done_path, "w") as fh:
+                fh.write("\n".join(kept) + ("\n" if kept else ""))
+            for n, _ in bad:
+                os.remove(os.path.join(dest, *n.split("/")))
+            sys.exit(f"\n{len(drop)} file(s) need refetching -- removed from {done_path}; "
+                     f"re-run without --verify to repair")
+        print(f"\nall {ok} files verified intact")
+        return
+
     if args.plan:
         by_group = {}
         for e in pending:
@@ -413,7 +469,13 @@ def main():
                   f"in {el/60:.1f} min ({human(rate)}/s), ETA {eta/60:.0f} min", flush=True)
 
     print(f"\ndone: {stats['files']} files, {human(stats['bytes'])} transferred -> {dest}")
-    print(f"  every member CRC-32 verified against the archive's central directory")
+    if stats["files"]:
+        print("  each fetched member was CRC-32 checked against the central directory")
+    else:
+        # Everything was already present. Resume only tested existence, so say so rather than
+        # implying this run re-validated bytes it never read.
+        print(f"  nothing to do: all {len(members)} files were already present.")
+        print(f"  presence != integrity -- run with --verify to re-hash them from disk.")
 
 
 if __name__ == "__main__":

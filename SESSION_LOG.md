@@ -5754,3 +5754,35 @@ prob_gru 的 ±2σ 覆盖率:F_R **96.9%**、CoPx_R 94.7%、CoPy_R 94.2%(名义 
 (目标是否仍为 RAW)。
 **N3(不变)**:D1 数据上跑 map 三臂,填补与 ActionSense 的最后一个对照。
 **N4(降级)**:权重衰减。天花板分析显示短 horizon 已近极限,正则化能挪动的空间有限。
+
+### 2026-08-19续 — 下载已完成(80,821 文件),但"已完成"的证据强度不够,遂加 `--verify`
+
+**现状**:用户 `git pull` 后跑 `--plan`,输出 `selected 80821 members (80821 already on disk)`,
+`to fetch: 0`。即 **signals 全量已落到 `/users/jhao3/forcevision`**。
+(`screen: command not found` —— CRC 前端没装 screen;但本次已跑完,不阻塞。**后续长任务用 `tmux`
+或 `nohup ... &`**。)
+
+**我发现自己的两个问题,均已修:**
+
+**(1) 完成文案在撒谎(措辞级 bug)。** 旧代码**无条件**打印
+"every member CRC-32 verified against the archive's central directory",
+**哪怕本次 fetch 了 0 个文件**。用户看到的正是这一行——它读起来像"刚刚校验过 80,821 个文件",
+**实际上本次一个字节都没读**。现改为分支:取到文件才说"each fetched member was CRC-32 checked";
+0 文件时明说 `presence != integrity -- run with --verify to re-hash them from disk.`
+
+**(2) 断点续传只证明"文件存在",不证明"内容正确"。**
+`done` 的过滤条件是 `os.path.exists`,**被截断的、写了一半的文件同样满足**。
+原本每个成员在**写入时**确实过了 CRC-32,但那是**上一次运行**的事;若此后磁盘写满、任务被
+kill、文件被误改,续传逻辑一律视为"已完成"。**故"80821 already on disk" ≠ "80821 完好"。**
+
+**新增 `--verify`**:从磁盘**重读**每个选中成员,核对 size 与 CRC-32(**只用缓存的 manifest,
+不走网络**)。发现问题时:把坏文件从 `done.txt` 剔除 + 删除损坏文件 → **直接重跑即精准补齐**,
+无需全量重下。
+
+**实测完整闭环**(本地 101 文件切片):干净 → `all 101 files verified intact`;
+人为**翻转 1 字节**(`crc 250e0f11 != 0f11bd5e`)+ **截断另一个**(`size 500 != 163820`)
+→ 精确报出这 2 个;重跑只补这 2 个(95.47 KiB)→ 再验 `all 101 files verified intact`。
+
+**待用户执行**(约 12 GiB 顺序读,几分钟):
+`python3 scripts/crc/fetch_d256.py --dest ~/forcevision --verify`
+**在此之前,这份数据不应被当作可信输入进入任何 D 系列决策链。**

@@ -30,3 +30,4 @@ Thumbs.db
 
 # raw tactile map clips: now TRACKED (committed for portability across machines, ~401MB).
 # (previously gitignored + kept only on CRC.)
+data/opentouch_states

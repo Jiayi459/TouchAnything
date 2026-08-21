@@ -5811,3 +5811,33 @@ instead of after hours")。Claude 于 `d618ec3` 新增的两个测试**从未被
 提交作业前必须先在 CRC 上单独跑一次该测试文件**,确认通过后再 `qsub`。
 
 **修复提交**:见下一条 commit。修复后本地仍为 skip,**故仍未验证**,须在 CRC 上先跑。
+
+### 2026-08-21 — 【结案】d256 signals 全量落盘并通过完整性校验
+
+**`--verify` 实测结果**(用户在 CRC 跑,355 s):
+```
+intact:  80821    missing: 0    corrupt: 0
+all 80821 files verified intact
+```
+**这是逐文件重读磁盘、按归档中央目录核对 size + CRC-32 的结果**,不是"文件存在"的推断。
+至此 `/users/jhao3/forcevision` 的数据可作为可信输入使用。
+
+**最终交付物清单:**
+- 路径 `/users/jhao3/forcevision/Dataset256/`,**12.34 GiB**,80,821 个成员
+  = **80,819 个 `.p` clip** + `signals/ego_4d_verb.npy`(148) + `signals/ego_4d_noun.npy`(112)。
+- 分组:`signals` 25,473 / `signals1` 28,426 / `signals2` 26,922;划分 train+val(**无 test**);
+  受试者 S01–S05。
+- 每 clip:`tactile-glove-{left,right}` (16,32,32) f32、`myo-emg-{l,r}` (16,8)、
+  `myo-acc-{l,r}` (16,3)、`joint-position` (16,28,3)、`{left,right}-hand-pose` (16,24,3)、
+  `label_text` + `label_idx`。
+- **传输 3.49 GiB 而非 185.2 GiB**(比值 53×),靠远程 ZIP 中央目录 + Range 选取实现;
+  视频侧 237.97 GiB 未取,日后可用同一脚本增量补(须先申请 `/temp180`/`/bluefs` allocation)。
+
+**遗留的两项(均不阻塞当前使用,但需在下游动作前处理):**
+1. **采样率未知。** clip 固定 16 帧且数值已预缩放到 ~[0,1],但**fps 没有出现在 pickle 里**。
+   `causal_velocity(sig, fps)`(`src/opentouch/prob_gru.py:80`)要真实 fps 才有物理意义,
+   **不可沿用 OpenTouch 的 fps 假设**。需从 ActionSense 原始文档或作者处确认。
+2. **license 未知**,ICLR 匿名投稿页无任何条款。自用不阻塞,**对外发表/分发前须与
+   `yichenl@mit.edu` 确认署名与授权**。
+
+**用户原始请求("浏览 webpage 开始下载这个 dataset 到 CRC")到此完成。**

@@ -257,7 +257,8 @@ def _val_scores(m, X, A, YL, Y, H, batch, dev) -> tuple[float, float]:
 def train(cfg: Config, train_ids: list[int], val_ids: list[int], t_in: int,
           hp: dict | None = None, norm: Norm | None = None, verbose: bool = True,
           device: str | None = None):
-    """Fit on TRAIN, keep the lowest-VAL-NLL weights. TEST is never touched.
+    """Fit on TRAIN, keep the weights that minimise the VAL curve named by hp["select_on"]
+    (NLL by default, MSE when the harness metric is what matters). TEST is never touched.
 
     `verbose` prints the window count up front and one line per epoch, flushed. The
     autoregressive decoder runs `horizon` sequential GRU steps per batch, so a CPU run is
@@ -377,13 +378,13 @@ def select_history(cfg: Config, train_ids: list[int], val_ids: list[int],
     plot_forecast_overlay -- whose rows ARE the history lengths -- impossible to draw
     without paying for the training twice. With keep=True the trained models come back, so
     their forecasts cost one prediction pass instead of one training run."""
+    hp = {**DEFAULT_HP, **(hp or {})}      # `hp` is optional, so read it only once merged
     scores, kept = {}, {}
     for s in histories_s:
         t_in = max(1, int(round(s * cfg.fps)))
         print(f"  sweep: history {s} s -> t_in={t_in} frames", flush=True)
         out = train(cfg, train_ids, val_ids, t_in, hp, device=device)
-        key = "best_val_mse" if str(hp.get("select_on", "nll")).lower() == "mse" \
-            else "best_val_nll"
+        key = "best_val_mse" if str(hp["select_on"]).lower() == "mse" else "best_val_nll"
         scores[t_in] = out[-1].get(key, out[-1]["best_val_nll"])
         if keep:
             kept[t_in] = out

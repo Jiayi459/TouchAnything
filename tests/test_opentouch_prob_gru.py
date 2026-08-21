@@ -206,22 +206,21 @@ def test_select_history_can_return_its_models(cfg):
         assert np.isfinite(p[10]).all()
 
 
-def test_select_on_picks_the_epoch_that_criterion_minimises(tmp_path):
-    """'nll' and 'mse' must load DIFFERENT weights when the two curves disagree.
+def test_select_on_picks_the_epoch_that_criterion_minimises(cfg):
+    """'nll' and 'mse' must be able to load DIFFERENT weights.
 
-    The 2026-08-20 D1 run had fold0's VAL MSE still falling while its VAL NLL climbed from
-    epoch 1, so the knob only means anything if the two settings actually diverge. This
-    asserts the mechanics -- both criteria are tracked, the requested one selects, and the
-    run records which -- rather than that any particular epoch wins on toy data.
+    The 2026-08-20 D1 run had fold0's VAL MSE still falling at epoch 8 while its VAL NLL had
+    climbed since epoch 1, so the knob only means anything if the two curves are tracked
+    independently and the requested one selects. This asserts those mechanics rather than
+    that any particular epoch wins on toy data.
     """
-    cfg = _cfg(tmp_path)
-    ids = [c["idx"] for c in P.eligible_clips(cfg)]
-    hp = dict(P.DEFAULT_HP, hidden=4, epochs=4, batch=8, log_train_every=1)
+    ids = list(range(12))
+    hp = {"epochs": 4, "hidden": 4, "batch": 8, "log_train_every": 1}
 
     seen = {}
     for crit in ("nll", "mse"):
-        _, _, _, _, _, h = P.train(cfg, ids[:8], ids[8:10], 6,
-                                   dict(hp, select_on=crit), device="cpu")
+        h = P.train(cfg, ids[:8], ids[8:10], 6, dict(hp, select_on=crit),
+                    verbose=False, device="cpu")[5]
         assert h["selected_on_metric"] == crit
         # both curves are recorded no matter which one selected
         assert len(h["val_nll"]) == 4 and len(h["val_mse"]) == 4
@@ -232,14 +231,14 @@ def test_select_on_picks_the_epoch_that_criterion_minimises(tmp_path):
     assert seen["nll"] == seen["mse"]
 
     with pytest.raises(ValueError, match="select_on"):
-        P.train(cfg, ids[:8], ids[8:10], 6, dict(hp, select_on="rmse"), device="cpu")
+        P.train(cfg, ids[:8], ids[8:10], 6, dict(hp, select_on="rmse"),
+                verbose=False, device="cpu")
 
 
-def test_history_sweep_scores_by_the_selecting_criterion(tmp_path):
+def test_history_sweep_scores_by_the_selecting_criterion(cfg):
     """Input length and weights must be chosen by one definition of "best", not two."""
-    cfg = _cfg(tmp_path)
-    ids = [c["idx"] for c in P.eligible_clips(cfg)]
-    hp = dict(P.DEFAULT_HP, hidden=4, epochs=2, batch=8, log_train_every=1)
+    ids = list(range(12))
+    hp = {"epochs": 2, "hidden": 4, "batch": 8, "log_train_every": 1}
 
     _, s_nll, k_nll = P.select_history(cfg, ids[:8], ids[8:10], (0.5, 1.0),
                                        dict(hp, select_on="nll"), keep=True)
@@ -247,5 +246,6 @@ def test_history_sweep_scores_by_the_selecting_criterion(tmp_path):
                                        dict(hp, select_on="mse"), keep=True)
     assert set(s_nll) == set(s_mse)
     for t in s_nll:
-        assert s_nll[t] == pytest.approx(k_nll[t]["best_val_nll"])
-        assert s_mse[t] == pytest.approx(k_mse[t]["best_val_mse"])
+        # kept[t] is the whole (model, norm, fnorm, vocab, by_idx, history) tuple
+        assert s_nll[t] == pytest.approx(k_nll[t][5]["best_val_nll"])
+        assert s_mse[t] == pytest.approx(k_mse[t][5]["best_val_mse"])

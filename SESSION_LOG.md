@@ -5786,3 +5786,28 @@ kill、文件被误改,续传逻辑一律视为"已完成"。**故"80821 already
 **待用户执行**(约 12 GiB 顺序读,几分钟):
 `python3 scripts/crc/fetch_d256.py --dest ~/forcevision --verify`
 **在此之前,这份数据不应被当作可信输入进入任何 D 系列决策链。**
+
+### 2026-08-21 — SELECT_ON 作业一分钟即退:Claude 提交了自己无法执行的测试
+
+**症状**:`SELECT_ON=mse` 的作业约 1 分钟结束(正常约 30–60 分钟)。
+
+**原因(Claude 的错,三处)**:作业脚本 `set -euo pipefail` 且**在训练前先跑 pytest**
+(见 `scripts/crc/opentouch_probgru_gpu.job:51-56` 的设计意图:"a broken fork fails in seconds
+instead of after hours")。Claude 于 `d618ec3` 新增的两个测试**从未被执行过**(本机 torch 因缺
+`libtorch_global_deps.dylib` 无法 import),其中有三处错误:
+
+1. **`_cfg(tmp_path)` 根本不存在**——该文件中 `cfg` 是 **pytest fixture**(第 29 行),既有测试
+   一律以参数接收。→ `NameError`,两个测试直接失败。
+2. **`kept[t_in]` 是六元组 `(m, norm, fnorm, vocab, by_idx, history)`,不是 history 字典**——
+   测试却按字典下标取 `["best_val_mse"]`。→ `TypeError`。已改为 `kept[t][5][...]`。
+3. **`select_history` 在 `hp=None` 时会崩**:Claude 新加的 `hp.get("select_on", ...)` 直接作用于
+   可选参数,而该函数签名允许 `None`。已改为先 `{**DEFAULT_HP, **(hp or {})}` 再读。
+
+**闸门本身是对的,不该改**:它按设计在 1 分钟内拦下了一个坏 fork,而不是让它浪费数小时 GPU。
+**该改的是 Claude 的做法。**
+
+**新增工作约定(D-TEST)**:**Claude 不得在无法执行的前提下,向 gating 测试套件中新增测试。**
+本机 torch 不可用,故 **凡改动 `tests/test_opentouch_prob_gru.py` 或 `tests/test_opentouch_gru_aggregate.py`,
+提交作业前必须先在 CRC 上单独跑一次该测试文件**,确认通过后再 `qsub`。
+
+**修复提交**:见下一条 commit。修复后本地仍为 skip,**故仍未验证**,须在 CRC 上先跑。
